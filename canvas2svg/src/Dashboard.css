@@ -1,3 +1,126 @@
+/* Dropdown profil utilizator jos sidebar */
+.profile-menu-dropdown {
+  position: absolute;
+  left: 90px;
+  bottom: 0;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(80,80,160,0.18);
+  padding: 18px 0 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200;
+  min-width: 220px;
+  align-items: center;
+}
+.profile-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.profile-menu-username {
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: #5b21b6;
+}
+.profile-menu-btn {
+  background: #ede9fe;
+  border: none;
+  border-radius: 12px;
+  color: #5b21b6;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 10px 18px;
+  margin: 0 12px;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(80,80,160,0.10);
+  width: 80%;
+  text-align: left;
+}
+.profile-menu-btn:hover {
+  background: #d1c4e9;
+  box-shadow: 0 4px 16px rgba(80,80,160,0.18);
+}
+/* Buton help/FAQ/AI tool dreapta jos */
+.dashboard-help-btn {
+  background: transparent;
+  border: none;
+  box-shadow: 0 2px 8px rgba(80,80,160,0.10);
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s, box-shadow 0.2s;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dashboard-help-btn:hover {
+  background: #ede9fe;
+  box-shadow: 0 4px 16px rgba(80,80,160,0.18);
+}
+/* Buton profil jos în sidebar */
+.sidebar-profile-btn-container {
+  position: absolute;
+  bottom: 32px;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.sidebar-profile-btn {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 50%;
+  transition: background 0.2s;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-profile-btn:hover {
+  background: #ede9fe;
+}
+/* Dropdown meniu pentru butonul Creează */
+.create-menu-dropdown {
+  position: absolute;
+  left: 60px;
+  top: 0;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(80,80,160,0.18);
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+  min-width: 180px;
+}
+.create-menu-btn {
+  background: #ede9fe;
+  border: none;
+  border-radius: 12px;
+  color: #5b21b6;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 10px 18px;
+  margin: 0 12px;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(80,80,160,0.10);
+}
+.create-menu-btn:hover {
+  background: #d1c4e9;
+  box-shadow: 0 4px 16px rgba(80,80,160,0.18);
+}
 .dashboard-top-btn {
   display: flex;
   align-items: center;

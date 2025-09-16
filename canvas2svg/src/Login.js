@@ -30,9 +30,12 @@ function Login() {
         setError(data.message || 'Eroare la autentificare!');
         return;
       }
-  // Succes: autentificare reușită
-  //alert('Logare cu succes!');
-  navigate('/dashboard');
+      // Salvează username-ul primit de la backend
+      if (data.username) {
+        localStorage.setItem('username', data.username);
+      }
+      // Succes: autentificare reușită
+      navigate('/dashboard');
     } catch (err) {
       setError('Eroare de rețea sau server!');
     }
