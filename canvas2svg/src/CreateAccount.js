@@ -12,15 +12,34 @@ function CreateAccount() {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (form.password !== form.confirmPassword) {
       setError('Parolele nu coincid!');
       return;
     }
     setError('');
-    // Aici poți adăuga logica de trimitere către backend
-    alert('Cont creat!');
+    try {
+      const response = await fetch('http://localhost:5000/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: form.username,
+          email: form.email,
+          password: form.password
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.message || 'Eroare la crearea contului!');
+        return;
+      }
+  // Succes: cont creat
+  alert('Cont creat cu succes!');
+  navigate('/dashboard');
+    } catch (err) {
+      setError('Eroare de rețea sau server!');
+    }
   };
 
   return (

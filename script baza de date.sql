@@ -61,3 +61,5 @@ CREATE TABLE colaboratori (
     rol VARCHAR(20) DEFAULT 'editor', -- ex: editor, viewer
     PRIMARY KEY (id_diagrama, id_user)
 );
+
+SELECT * FROM users;
