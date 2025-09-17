@@ -7,6 +7,7 @@ import Login from './Login';
 import Help from './Help';
 import Info from './Info';
 import Dashboard from './Dashboard';
+import GraphEditor from './GraphEditor';
 import './App.css';
 
 function HomeWithNav() {
@@ -24,6 +25,7 @@ function App() {
         <Route path="/help" element={<Help />} />
         <Route path="/info" element={<Info />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/graph" element={<GraphEditor />} />
       </Routes>
     </Router>
   );

@@ -83,7 +83,7 @@ function Dashboard() {
           {showMenu && (
             <div className="create-menu-dropdown" ref={menuRef}>
               <button className="create-menu-btn">Graf orientat</button>
-              <button className="create-menu-btn">Graf neorientat</button>
+              <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/graph'); }}>Graf neorientat</button>
               <button className="create-menu-btn">UML</button>
               <button className="create-menu-btn">Rețea Petri</button>
               <button className="create-menu-btn">Automat</button>
