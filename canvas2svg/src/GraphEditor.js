@@ -3,6 +3,108 @@ import './GraphEditor.css';
 import { useNavigate } from 'react-router-dom';
 
 function GraphEditor() {
+  // Verifică dacă linia dreaptă dintre două puncte intersectează vreun nod
+  function isLineClear(x1, y1, x2, y2, nodes, excludeIds = []) {
+    for (const n of nodes) {
+      if (excludeIds.includes(n.id)) continue;
+      // Proiecția punctului pe linie
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy);
+      if (len === 0) continue;
+      const t = ((n.x - x1) * dx + (n.y - y1) * dy) / (len * len);
+      // Clamp t între 0 și 1
+      const tClamped = Math.max(0, Math.min(1, t));
+      const px = x1 + tClamped * dx;
+      const py = y1 + tClamped * dy;
+      const dist = Math.hypot(px - n.x, py - n.y);
+  if (dist < 60) return false; // distanță de evitare și mai mare
+    }
+    return true;
+  }
+  // Transformă o listă de puncte într-un path SVG smooth (Catmull-Rom)
+  function catmullRom2bezier(points) {
+    if (points.length < 2) return '';
+    let d = `M ${points[0]}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = i > 0 ? points[i - 1].split(',').map(Number) : points[i].split(',').map(Number);
+      const p1 = points[i].split(',').map(Number);
+      const p2 = points[i + 1].split(',').map(Number);
+      const p3 = i < points.length - 2 ? points[i + 2].split(',').map(Number) : p2;
+      // Catmull-Rom to Bezier conversion
+      const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+      const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+      const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+    }
+    return d;
+  }
+  // --- Algoritm Lee/BFS pentru edge routing ---
+  // Parametri grid
+  const GRID_SIZE = 1; // px per celulă
+  const CANVAS_W = 900;
+  const CANVAS_H = 500;
+
+  // Creează grid cu celule blocate pentru noduri
+  function createGrid(nodes) {
+    const cols = Math.floor(CANVAS_W / GRID_SIZE);
+    const rows = Math.floor(CANVAS_H / GRID_SIZE);
+    const grid = Array.from({ length: rows }, () => Array(cols).fill(0));
+    nodes.forEach(n => {
+  const r = 40; // zona blocată mărită pentru ocolire
+      const left = Math.max(0, Math.floor((n.x - r) / GRID_SIZE));
+      const right = Math.min(cols - 1, Math.ceil((n.x + r) / GRID_SIZE));
+      const top = Math.max(0, Math.floor((n.y - r) / GRID_SIZE));
+      const bottom = Math.min(rows - 1, Math.ceil((n.y + r) / GRID_SIZE));
+      for (let i = top; i <= bottom; i++) {
+        for (let j = left; j <= right; j++) {
+          // Verifică dacă punctul e în cerc
+          const cx = j * GRID_SIZE + GRID_SIZE / 2;
+          const cy = i * GRID_SIZE + GRID_SIZE / 2;
+          if (Math.hypot(cx - n.x, cy - n.y) <= r) {
+            grid[i][j] = 1; // blocat
+          }
+        }
+      }
+    });
+    return grid;
+  }
+
+  // BFS Lee: returnează drumul de la (x1, y1) la (x2, y2) pe grid
+  function leePath(grid, start, end) {
+    const rows = grid.length;
+    const cols = grid[0].length;
+    const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+    const parent = Array.from({ length: rows }, () => Array(cols).fill(null));
+    const q = [];
+    q.push(start);
+    visited[start[0]][start[1]] = true;
+    const dirs = [ [0,1], [1,0], [0,-1], [-1,0], [1,1], [1,-1], [-1,1], [-1,-1] ];
+    while (q.length) {
+      const [i, j] = q.shift();
+      if (i === end[0] && j === end[1]) break;
+      for (const [di, dj] of dirs) {
+        const ni = i + di, nj = j + dj;
+        if (ni >= 0 && ni < rows && nj >= 0 && nj < cols && !visited[ni][nj] && grid[ni][nj] === 0) {
+          visited[ni][nj] = true;
+          parent[ni][nj] = [i, j];
+          q.push([ni, nj]);
+        }
+      }
+    }
+    // Reconstruiește drumul
+    const path = [];
+    let cur = end;
+    while (cur && !(cur[0] === start[0] && cur[1] === start[1])) {
+      path.push(cur);
+      cur = parent[cur[0]][cur[1]];
+    }
+    path.push(start);
+    path.reverse();
+    return path;
+  }
+
   const [showDeleteIcon, setShowDeleteIcon] = useState({ nodeId: null, x: 0, y: 0 });
   // La click dreapta pe nod, afișează coșul de gunoi lângă nod
   function handleNodeContextMenu(node, e) {
@@ -28,11 +130,20 @@ function GraphEditor() {
   }
 
   // Mută nodul cu mouse-ul
+  // Verifică suprapunere cu alt nod
+  function isOverlapping(x, y, excludeId = null) {
+    const radius = 22; // raza nodului
+    return nodes.some(n => n.id !== excludeId && Math.hypot(n.x - x, n.y - y) < radius * 2);
+  }
+
   function handleMouseMove(e) {
     if (draggingNodeId !== null) {
       const x = e.clientX - dragOffset.x;
       const y = e.clientY - dragOffset.y;
-      setNodes(nodes => nodes.map(n => n.id === draggingNodeId ? { ...n, x, y } : n));
+      // Nu mută dacă se suprapune cu alt nod
+      if (!isOverlapping(x, y, draggingNodeId)) {
+        setNodes(nodes => nodes.map(n => n.id === draggingNodeId ? { ...n, x, y } : n));
+      }
     }
   }
 
@@ -75,7 +186,10 @@ function GraphEditor() {
     const rect = e.target.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    setNodes([...nodes, { id: nodes.length + 1, x, y, label: '' }]);
+    // Nu adaugă dacă se suprapune cu alt nod
+    if (!isOverlapping(x, y)) {
+      setNodes([...nodes, { id: nodes.length + 1, x, y, label: '' }]);
+    }
     setAddNodeMode(false);
   }
 
@@ -131,15 +245,56 @@ function GraphEditor() {
             const from = nodes.find(n => n.id === edge.from);
             const to = nodes.find(n => n.id === edge.to);
             if (!from || !to) return null;
+            // Start/End pe marginea cercului
+            const r = 28;
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist === 0) return null;
+            const x1 = from.x + (dx * r) / dist;
+            const y1 = from.y + (dy * r) / dist;
+            const x2 = to.x - (dx * r) / dist;
+            const y2 = to.y - (dy * r) / dist;
+            // Dacă linia dreaptă nu intersectează niciun nod, desenează direct
+            if (isLineClear(x1, y1, x2, y2, nodes, [from.id, to.id])) {
+              return (
+                <line
+                  key={idx}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke="#8b5cf6"
+                  strokeWidth={3}
+                  fill="none"
+                />
+              );
+            }
+            // --- Curbă Bezier smooth, control point sub nodul intermediar ---
+            const avoidNode = nodes.filter(n => n.id !== from.id && n.id !== to.id)
+              .map(n => ({
+                n,
+                dist: Math.abs((to.x-from.x)*(from.y-n.y)-(from.x-n.x)*(to.y-from.y))/dist
+              }))
+              .sort((a,b) => a.dist-b.dist)[0];
+            let cx, cy;
+            if (avoidNode && avoidNode.dist < 70) {
+              // Control point sub nodul intermediar, la o distanță vizibilă
+              cx = avoidNode.n.x;
+              cy = avoidNode.n.y + 60;
+            } else {
+              // Control point la mijloc, cu offset vertical
+              cx = (from.x + to.x)/2;
+              cy = (from.y + to.y)/2 + 60;
+            }
+            const pathD = `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`;
             return (
-              <line
+              <path
                 key={idx}
-                x1={from.x}
-                y1={from.y}
-                x2={to.x}
-                y2={to.y}
+                d={pathD}
                 stroke="#8b5cf6"
                 strokeWidth={3}
+                fill="none"
               />
             );
           })}
