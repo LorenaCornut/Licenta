@@ -4,7 +4,6 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-}
 .graph-editor-header {
   display: flex;
   align-items: center;
@@ -12,14 +11,14 @@
   width: 900px;
   margin-top: 32px;
   margin-bottom: 18px;
-}
 .graph-editor-header h2 {
   font-size: 2rem;
   font-weight: 700;
   color: #5b21b6;
 }
+}
 .graph-back-btn {
-  background: #ede9fe;
+  background: #fff;
   border: none;
   border-radius: 14px;
   color: #5b21b6;
@@ -28,10 +27,18 @@
   padding: 10px 22px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(80,80,160,0.10);
-  transition: background 0.2s, box-shadow 0.2s;
+  transition: background 0.2s, box-shadow 0.2s, color 0.2s;
+}
+.graph-back-btn-abs {
+  position: absolute;
+  top: 18px;
+  right: 38px;
+  z-index: 10;
+}
 }
 .graph-back-btn:hover {
-  background: #d1c4e9;
+  background: #ede9fe;
+  color: #3c1a6e;
   box-shadow: 0 4px 16px rgba(80,80,160,0.18);
 }
 .graph-toolbar {
