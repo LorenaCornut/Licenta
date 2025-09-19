@@ -552,29 +552,32 @@ function GraphEditor() {
   // La blur sau Enter, salvează textul și ascunde inputul
   function handleEditBlurOrEnter() {
     // Actualizează label-ul nodului
-    setNodes(nodes.map(n => n.id === editingNodeId ? { ...n, label: editingValue } : n));
-    // Dacă label-ul nu e gol, adaug automat la 'noduri dorite' dacă nu există
-    if (editingValue.trim()) {
-      const labelsInTextarea = assistantNodes.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-      if (!labelsInTextarea.includes(editingValue.trim())) {
-        setAssistantNodes(labelsInTextarea.concat(editingValue.trim()).join('\n'));
-      }
-      // Adaug automat muchii valide la 'muchii dorite'
-      const node = nodes.find(n => n.id === editingNodeId);
-      if (node) {
-        edges.forEach(e => {
-          const fromNode = nodes.find(n => n.id === e.from);
-          const toNode = nodes.find(n => n.id === e.to);
-          if (fromNode?.label && toNode?.label) {
-            const edgeText = `${fromNode.label} ${toNode.label}`;
-            const edgesInTextarea = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-            if (!edgesInTextarea.includes(edgeText)) {
-              setAssistantEdges(edgesInTextarea.concat(edgeText).join('\n'));
-            }
-          }
-        });
-      }
+    const node = nodes.find(n => n.id === editingNodeId);
+    const oldLabel = node?.label || '';
+    const newLabel = editingValue.trim();
+    setNodes(nodes.map(n => n.id === editingNodeId ? { ...n, label: newLabel } : n));
+
+    // Actualizează 'noduri dorite': înlocuiește vechiul label cu cel nou
+    if (newLabel) {
+      let labelsInTextarea = assistantNodes.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      labelsInTextarea = labelsInTextarea.map(l => l === oldLabel ? newLabel : l);
+      // Elimină duplicate
+      labelsInTextarea = Array.from(new Set(labelsInTextarea));
+      setAssistantNodes(labelsInTextarea.join('\n'));
     }
+
+    // Actualizează 'muchii dorite': înlocuiește vechiul label cu cel nou în toate muchiile
+    if (oldLabel && newLabel) {
+      let edgesInTextarea = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      edgesInTextarea = edgesInTextarea.map(line => {
+        const parts = line.split(/\s+/);
+        return parts.map(p => p === oldLabel ? newLabel : p).join(' ');
+      });
+      // Elimină duplicate
+      edgesInTextarea = Array.from(new Set(edgesInTextarea));
+      setAssistantEdges(edgesInTextarea.join('\n'));
+    }
+
     setEditingNodeId(null);
     setEditingValue('');
   }
