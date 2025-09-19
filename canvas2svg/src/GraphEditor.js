@@ -1,6 +1,13 @@
+
 import React, { useState } from 'react';
 import './GraphEditor.css';
 import { useNavigate } from 'react-router-dom';
+
+  // Funcție placeholder pentru butonul Salvează
+  function handleSave() {
+    // TODO: Adaugă funcționalitatea de salvare aici
+    alert('Funcția de salvare nu este implementată încă.');
+  }
 
 function GraphEditor() {
   // --- DECLARĂ TOATE STATE-URILE LA ÎNCEPUT ---
@@ -10,27 +17,27 @@ function GraphEditor() {
   const [assistantEdges, setAssistantEdges] = useState("");
   const [assistantError, setAssistantError] = useState("");
 
-  // Sincronizează muchiile din graf cu textarea 'muchiile dorite'
+  // Sincronizează muchiile din graf cu textarea 'muchiile dorite', doar dacă ambele noduri au text
   React.useEffect(() => {
-    // Generează lista muchii ca text (A B\nC D)
-    const edgePairs = edges.map(e => {
-      const fromLabel = nodes.find(n => n.id === e.from)?.label || e.from;
-      const toLabel = nodes.find(n => n.id === e.to)?.label || e.to;
-      return `${fromLabel} ${toLabel}`;
-    });
+    const edgePairs = edges
+      .map(e => {
+        const fromNode = nodes.find(n => n.id === e.from);
+        const toNode = nodes.find(n => n.id === e.to);
+        if (!fromNode?.label || !toNode?.label) return null;
+        return `${fromNode.label} ${toNode.label}`;
+      })
+      .filter(Boolean);
     const edgesInTextarea = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    // Adaug doar dacă nu există deja
     const allEdges = Array.from(new Set([...edgesInTextarea, ...edgePairs]));
     if (allEdges.join('\n') !== assistantEdges) {
       setAssistantEdges(allEdges.join('\n'));
     }
   }, [edges, nodes]);
 
-  // Sincronizează nodurile din graf cu caseta 'nodurile dorite'
+  // Sincronizează nodurile din graf cu caseta 'nodurile dorite', doar noduri cu text
   React.useEffect(() => {
-    // Dacă s-a adăugat manual un nod nou, îl adaug în textarea dacă nu există deja
     const labelsInTextarea = assistantNodes.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    const labelsInGraph = nodes.map(n => n.label);
+    const labelsInGraph = nodes.map(n => n.label).filter(Boolean);
     const allLabels = Array.from(new Set([...labelsInTextarea, ...labelsInGraph]));
     if (allLabels.join('\n') !== assistantNodes) {
       setAssistantNodes(allLabels.join('\n'));
@@ -521,13 +528,15 @@ function GraphEditor() {
         // Ajustează punctele intermediare pentru claritate vizuală
         const adjustedPoints = adjustPointsAwayFromCongestion(finalPoints, nodes, edges);
         setEdges([...edges, { from: edgeNodes[0], to: nodeId, points: adjustedPoints }]);
-        // --- Adaug muchia și în textarea dacă nu există deja ---
-        const fromLabel = nodes.find(n => n.id === edgeNodes[0])?.label || edgeNodes[0];
-        const toLabel = nodes.find(n => n.id === nodeId)?.label || nodeId;
-        const edgeText = `${fromLabel} ${toLabel}`;
-        const edgesInTextarea = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-        if (!edgesInTextarea.includes(edgeText)) {
-          setAssistantEdges(edgesInTextarea.concat(edgeText).join('\n'));
+        // Adaug muchia la 'Muchiile dorite' doar dacă ambele noduri au text
+        const fromNode = nodes.find(n => n.id === edgeNodes[0]);
+        const toNode = nodes.find(n => n.id === nodeId);
+        if (fromNode?.label && toNode?.label) {
+          const edgeText = `${fromNode.label} ${toNode.label}`;
+          const edgesInTextarea = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          if (!edgesInTextarea.includes(edgeText)) {
+            setAssistantEdges(edgesInTextarea.concat(edgeText).join('\n'));
+          }
         }
         setAddEdgeMode(false);
         setEdgeNodes([]);
@@ -542,7 +551,30 @@ function GraphEditor() {
 
   // La blur sau Enter, salvează textul și ascunde inputul
   function handleEditBlurOrEnter() {
+    // Actualizează label-ul nodului
     setNodes(nodes.map(n => n.id === editingNodeId ? { ...n, label: editingValue } : n));
+    // Dacă label-ul nu e gol, adaug automat la 'noduri dorite' dacă nu există
+    if (editingValue.trim()) {
+      const labelsInTextarea = assistantNodes.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (!labelsInTextarea.includes(editingValue.trim())) {
+        setAssistantNodes(labelsInTextarea.concat(editingValue.trim()).join('\n'));
+      }
+      // Adaug automat muchii valide la 'muchii dorite'
+      const node = nodes.find(n => n.id === editingNodeId);
+      if (node) {
+        edges.forEach(e => {
+          const fromNode = nodes.find(n => n.id === e.from);
+          const toNode = nodes.find(n => n.id === e.to);
+          if (fromNode?.label && toNode?.label) {
+            const edgeText = `${fromNode.label} ${toNode.label}`;
+            const edgesInTextarea = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+            if (!edgesInTextarea.includes(edgeText)) {
+              setAssistantEdges(edgesInTextarea.concat(edgeText).join('\n'));
+            }
+          }
+        });
+      }
+    }
     setEditingNodeId(null);
     setEditingValue('');
   }
@@ -551,24 +583,36 @@ function GraphEditor() {
   <div className="graph-editor-root">
       <button className="graph-back-btn graph-back-btn-abs" onClick={() => navigate('/dashboard')}>Înapoi la Dashboard</button>
       <div className="graph-editor-header">
-        <h2>Editor graf neorientat</h2>
+        <h2 style={{
+          fontFamily: 'Caveat, cursive',
+          fontSize: '2.4rem',
+          fontWeight: 400,
+          background: 'linear-gradient(90deg, #2563eb 0%, #8b5cf6 100%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          backgroundClip: 'text',
+          color: 'transparent',
+          marginBottom: 0
+        }}>Editor graf neorientat</h2>
       </div>
-      <div className="graph-toolbar">
+    <div className="graph-toolbar" style={{ width: '100%', justifyContent: 'flex-start', margin: 5, paddingLeft: 240, marginBottom: 32 }}>
         <button className={`graph-toolbar-btn${addNodeMode ? ' active' : ''}`} onClick={handleAddNode}>Adaugă nod</button>
         <button className={`graph-toolbar-btn${addEdgeMode ? ' active' : ''}`} onClick={handleAddEdge}>Adaugă muchie</button>
         <button className="graph-toolbar-btn">Șterge</button>
         <button className="graph-toolbar-btn">Reset</button>
-        <button className="graph-toolbar-btn">Export</button>
+  <button className="graph-toolbar-btn">Export</button>
+  <button className="graph-toolbar-btn" onClick={handleSave}>Salvează</button>
       </div>
       <div className="graph-main-content" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}>
-        <div className="graph-canvas-container">
+  <div className="graph-canvas-container" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingLeft: 16, paddingBottom: 16 }}>
           <svg
             className="graph-canvas"
-            width={900}
-            height={500}
+            width={1000}
+            height={540}
             onClick={handleCanvasClick}
             onMouseMove={handleMouseMove}
             onMouseUp={handleCanvasMouseUp}
+            style={{ maxWidth: '1000px', maxHeight: '540px', width: '100%', height: '100%' }}
           >
             {/* Preview muchie cu puncte intermediare */}
             {addEdgeMode && edgeNodes.length === 1 && edgePreviewPoints.length > 0 && (() => {
@@ -752,7 +796,7 @@ function GraphEditor() {
             ))}
           </svg>
         </div>
-        <div className="graph-assistant-panel" style={{ minWidth: 260, maxWidth: 320, background: '#fff', borderRadius: 18, boxShadow: '0 2px 12px rgba(80,80,160,0.10)', padding: '18px 18px 14px 18px', marginLeft: 32, display: 'flex', flexDirection: 'column', gap: 10, height: 'fit-content' }}>
+  <div className="graph-assistant-panel" style={{ minWidth: 280, maxWidth: 360, background: '#fff', borderRadius: 18, boxShadow: '0 2px 12px rgba(80,80,160,0.10)', padding: '22px 22px 0 22px', marginLeft: 24, marginRight: 32, display: 'flex', flexDirection: 'column', gap: 12, height: '520px' }}>
           <div className="graph-assistant-title" style={{ fontSize: '1.2rem', fontWeight: 700, color: '#5b21b6', marginBottom: 8 }}>Vrei să te ajut?</div>
           <div className="graph-assistant-label" style={{ fontSize: '1rem', fontWeight: 600, color: '#3c1a6e', marginBottom: 2 }}>Nodurile dorite:</div>
           <textarea className="graph-assistant-input" rows={5} value={assistantNodes} onChange={e => setAssistantNodes(e.target.value)} placeholder={"A\nB\nC"} style={{ width: '100%', minHeight: 60, maxHeight: 120, resize: 'vertical', borderRadius: 8, border: '1px solid #d1c4e9', padding: '8px 10px', fontSize: '1rem', fontFamily: 'inherit', boxSizing: 'border-box', overflowY: 'auto' }} />
