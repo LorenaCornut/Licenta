@@ -9,6 +9,390 @@ import { useNavigate } from 'react-router-dom';
     alert('Funcția de salvare nu este implementată încă.');
   }
 
+// ============ HELPER FUNCTIONS ============
+
+/**
+ * Calculează distanța perpendiculară de la un punct (px, py) la segmentul de linie (x1,y1)-(x2,y2)
+ */
+function distancePointToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  
+  if (len2 === 0) {
+    // Segment este un punct
+    return Math.hypot(px - x1, py - y1);
+  }
+  
+  // Proiecția punctului pe linie (parametrul t, 0-1)
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  
+  // Punctul cel mai apropiat pe segment
+  const closestX = x1 + t * dx;
+  const closestY = y1 + t * dy;
+  
+  return Math.hypot(px - closestX, py - closestY);
+}
+
+/**
+ * Determină dacă punctul (px, py) este pe stânga sau dreapta liniei (x1,y1)-(x2,y2)
+ * Returnează: +1 pentru dreapta, -1 pentru stânga (folosind produsul vectorial)
+ */
+function sideOfLine(px, py, x1, y1, x2, y2) {
+  const crossProduct = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+  return crossProduct > 0 ? 1 : -1;
+}
+
+/**
+ * Tesselează o curbă Bezier cubică în puncte discrete
+ * @param x0, y0 - START
+ * @param x1, y1 - CONTROL POINT 1
+ * @param x2, y2 - CONTROL POINT 2
+ * @param x3, y3 - END
+ * @param numSegments - numărul de segmente (puncte = numSegments + 1)
+ * @returns Array de {x, y} puncte de-a lungul curbei
+ */
+function tesselateBezierCurve(x0, y0, x1, y1, x2, y2, x3, y3, numSegments = 60) {
+  const points = [];
+  
+  for (let i = 0; i <= numSegments; i++) {
+    const t = i / numSegments;
+    
+    // Formulă Bezier cubică: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+    const mt = 1 - t;
+    const mt2 = mt * mt;
+    const mt3 = mt2 * mt;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    
+    const x = mt3 * x0 + 3 * mt2 * t * x1 + 3 * mt * t2 * x2 + t3 * x3;
+    const y = mt3 * y0 + 3 * mt2 * t * y1 + 3 * mt * t2 * y2 + t3 * y3;
+    
+    points.push({ x, y });
+  }
+  
+  return points;
+}
+
+/**
+ * Ajustează punctele tessellate ale unei curbe pentru a evita coliziuni
+ * Pentru fiecare punct, calculez forțe cumulate din TOȚI obstacolele
+ * Mutî-l gradual bazat pe cât de adânc e în fiecare obstacol
+ * @param tessellatedPoints - Array de {x, y} puncte pe curbă
+ * @param obstacleNodes - Array de obstacole {node, d, side, t}
+ * @param nodeRadius, margin - parametri de siguranță
+ * @returns Array ajustat de {x, y} puncte
+ */
+function adjustTessellatedCurveForCollisions(tessellatedPoints, obstacleNodes, nodeRadius, margin) {
+  const adjustedPoints = tessellatedPoints.map(p => ({ ...p }));
+  const safeDistance = nodeRadius + margin;
+  
+  // Pentru fiecare punct tessellat
+  for (let i = 0; i < adjustedPoints.length; i++) {
+    const point = adjustedPoints[i];
+    let totalForceX = 0;
+    let totalForceY = 0;
+    
+    // Verific coliziuni cu TOȚI obstacolele și acumul forțele
+    for (const obstacle of obstacleNodes) {
+      const d = Math.hypot(point.x - obstacle.node.x, point.y - obstacle.node.y);
+      
+      // Dacă e în coliziune
+      if (d < safeDistance) {
+        // Cât de mult penetrează (0 la margine, 1 în centru)
+        const penetration = safeDistance - d;
+        const strength = penetration / safeDistance;
+        
+        // Calculez vectorul de la obstacol la punct
+        const dx = point.x - obstacle.node.x;
+        const dy = point.y - obstacle.node.y;
+        
+        // Normalizez
+        const len = Math.hypot(dx, dy);
+        if (len > 0) {
+          const ux = dx / len;
+          const uy = dy / len;
+          
+          // Forța pentru acest obstacol (proporțional cu penetrație)
+          const forceStrength = strength * (nodeRadius + 15);
+          totalForceX += ux * forceStrength;
+          totalForceY += uy * forceStrength;
+        }
+      }
+    }
+    
+    // Aplica forța cumulată punctului
+    if (totalForceX !== 0 || totalForceY !== 0) {
+      point.x += totalForceX;
+      point.y += totalForceY;
+    }
+  }
+  
+  return adjustedPoints;
+}
+
+/**
+ * Aplica smoothing agresiv pe o seriă de puncte folosind moving average
+ * Reduce abruptele și colțurile din curbă cu pondere mare pe vecinii
+ * @param points - Array de {x, y}
+ * @param passes - Numărul de pase de smoothing (default 4)
+ * @returns Array smoothat de {x, y}
+ */
+function smoothPoints(points, passes = 4) {
+  if (points.length < 3) return points;
+  
+  let current = points.map(p => ({ ...p }));
+  
+  // Aplica smoothing de mai multe ori
+  for (let pass = 0; pass < passes; pass++) {
+    const smoothed = [];
+    
+    // Păstrez punctele de capăt
+    smoothed.push(current[0]);
+    
+    // Pentru fiecare punct interior, calculez media cu vecinii cu pondere mai mare
+    for (let i = 1; i < current.length - 1; i++) {
+      const prev = current[i - 1];
+      const curr = current[i];
+      const next = current[i + 1];
+      
+      // Media cu mai multă influență de la vecinii
+      // Pondere: prev=1, curr=2, next=1 → total 4 (mai blended)
+      smoothed.push({
+        x: (prev.x + 2 * curr.x + next.x) / 4,
+        y: (prev.y + 2 * curr.y + next.y) / 4
+      });
+    }
+    
+    // Păstrez punctul final
+    smoothed.push(current[current.length - 1]);
+    current = smoothed;
+  }
+  
+  return current;
+}
+
+/**
+ * Convertește o listă de puncte în SVG path smooth (Catmull-Rom)
+ * @param points - Array de {x, y}
+ * @returns SVG path string
+ */
+function pointsToSmoothPath(points) {
+  if (points.length < 2) return '';
+  
+  let d = `M ${points[0].x},${points[0].y}`;
+  
+  // Folosesc Catmull-Rom pentru a crea o curbă smooth între puncte
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = i > 0 ? points[i - 1] : points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = i < points.length - 2 ? points[i + 2] : p2;
+    
+    // Controlele Catmull-Rom → Bezier
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+  }
+  
+  return d;
+}
+
+/**
+ * Construiește un path Bezier cubic SMOOTH care evită obstacolele (noduri)
+ * @param x1, y1 - START
+ * @param x2, y2 - END
+ * @param allNodes - toate nodurile din graf
+ * @param excludeIds - IDs ale nodurilor care sunt capete (nu sunt obstacole)
+ * @returns SVG path string pentru Bezier cubic
+ */
+function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
+  const nodeRadius = 28;
+  const margin = 30; // buffer în jurul nodului
+
+  // Calculez direcția și lungimea
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist === 0) return `M ${x1},${y1}`; // nu pot desena dacă nodurile sunt în același punct
+
+  // Direcția unitară (normalizată) de la A la B
+  const ux = dx / dist;
+  const uy = dy / dist;
+
+  // Vectorul perpendicular (90 grade la stânga)
+  const px = -uy;
+  const py = ux;
+
+  // ===== PASUL 1: Detectez obstacolele și calculez poziția lor pe linie =====
+  const obstacleNodes = allNodes
+    .filter(n => !excludeIds.includes(n.id))
+    .map(n => {
+      // Distanța perpendiculară de la nod la linie
+      const d = distancePointToSegment(n.x, n.y, x1, y1, x2, y2);
+      
+      // Pe care parte a liniei e nodul
+      const side = sideOfLine(n.x, n.y, x1, y1, x2, y2);
+
+      // Unde se află pe linie (0 = start, 1 = end)
+      const dx_to_node = n.x - x1;
+      const dy_to_node = n.y - y1;
+      const t = (dx_to_node * (x2 - x1) + dy_to_node * (y2 - y1)) / (dist * dist);
+      const tClamped = Math.max(0, Math.min(1, t));
+
+      return { node: n, d, side, t: tClamped };
+    });
+
+  // ===== PASUL 2: Calculez offseturile SEPARATE pentru c1 și c2 =====
+  // ZONA C1 (0-40%): obstacolele din prima jumătate
+  let c1OffsetUp = 0;
+  let c1OffsetDown = 0;
+  
+  // ZONA C2 (60-100%): obstacolele din a doua jumătate
+  let c2OffsetUp = 0;
+  let c2OffsetDown = 0;
+  
+  let totalObstacleT = 0;
+  let obstacleCount = 0;
+
+  obstacleNodes.forEach(o => {
+    if (o.d < nodeRadius + margin) {
+      // Cât de mult intră în zona de siguranță
+      const penetration = nodeRadius + margin - o.d;
+      
+      // Strength: 0 la margine, 1 în centru
+      const strength = penetration / (nodeRadius + margin);
+      const magnitude = strength * (nodeRadius + 20) * 2.5;  // Crescut din 1.5 la 2.5
+
+      // Verific dacă nodul e DEASUPRA sau DEDESUBTUL liniei pe axa Y
+      const t = ((o.node.x - x1) * (x2 - x1) + (o.node.y - y1) * (y2 - y1)) / (dist * dist);
+      const tClamped = Math.max(0, Math.min(1, t));
+      const lineY = y1 + tClamped * (y2 - y1);
+
+      // DETECT TOATĂ LUNGIMEA: Fiecare obstacol afectează AMBELE c1 și c2 cu pondere
+      // Pondere pentru c1: mai mare dacă e mai aproape de start
+      const c1Weight = Math.max(0, 1 - tClamped);  // 1 la start, 0 la end
+      const c2Weight = tClamped;                    // 0 la start, 1 la end
+
+      const c1Magnitude = magnitude * c1Weight;
+      const c2Magnitude = magnitude * c2Weight;
+
+      if (o.node.y < lineY) {
+        // Nodul e DEASUPRA
+        c1OffsetUp += c1Magnitude;
+        c2OffsetUp += c2Magnitude;
+      } else {
+        // Nodul e DEDESUBTUL
+        c1OffsetDown += c1Magnitude;
+        c2OffsetDown += c2Magnitude;
+      }
+
+      // Însumeaza poziția pe linie
+      totalObstacleT += o.t;
+      obstacleCount++;
+    }
+  });
+
+  // ===== PASUL 3: ALEG offseturile finale pentru c1 și c2 INDEPENDENT =====
+  let c1Offset = 0;
+  if (c1OffsetUp > c1OffsetDown) {
+    c1Offset = c1OffsetUp;
+  } else if (c1OffsetDown > c1OffsetUp) {
+    c1Offset = -c1OffsetDown;
+  }
+
+  let c2Offset = 0;
+  if (c2OffsetUp > c2OffsetDown) {
+    c2Offset = c2OffsetUp;
+  } else if (c2OffsetDown > c2OffsetUp) {
+    c2Offset = -c2OffsetDown;
+  }
+
+  // ===== PASUL 4: Calculez media poziției obstacolelor =====
+  const avgObstacleT = obstacleCount > 0 ? totalObstacleT / obstacleCount : 0.5;
+
+  // ===== PASUL 5: Pozitionez control points SMART (unde sunt obstacolele) =====
+  // c1 merge între 15% și 40%, cu preferință la media obstacolelor
+  const c1_t = Math.max(0.15, Math.min(avgObstacleT, 0.4));
+  
+  // c2 merge între 60% și 85%, cu preferință la media obstacolelor
+  const c2_t = Math.max(avgObstacleT, Math.min(0.85, 0.6));
+
+  // Calculez coordonatele control points (pe linia de bază)
+  let c1 = {
+    x: x1 + ux * (dist * c1_t),
+    y: y1 + uy * (dist * c1_t)
+  };
+
+  let c2 = {
+    x: x1 + ux * (dist * c2_t),
+    y: y1 + uy * (dist * c2_t)
+  };
+
+  // ===== PASUL 6: Construiesc control points cu offseturile inițiale =====
+  let finalC1 = {
+    x: x1 + ux * (dist * c1_t) + px * c1Offset,
+    y: y1 + uy * (dist * c1_t) + py * c1Offset
+  };
+
+  let finalC2 = {
+    x: x1 + ux * (dist * c2_t) + px * c2Offset,
+    y: y1 + uy * (dist * c2_t) + py * c2Offset
+  };
+
+  // ===== PASUL 7-8: CREATE SINGLE CONTROL POINT PER OBSTACLE =====
+  // Creed un singur punct intermediar per obstacol (mutat perpendicular pentru ocolire)
+  const controlPoints = [{ x: x1, y: y1 }]; // START
+  
+  // Pentru fiecare obstacol, creed UN punct de control la mijlocul muchiei
+  const obstaclesWithOffset = obstacleNodes
+    .filter(o => o.d < nodeRadius + margin)
+    .sort((a, b) => a.t - b.t); // sortez după poziția pe muchie
+  
+  obstaclesWithOffset.forEach(obstacle => {
+    // Calculez poziția pe linie unde e obstacolul (proiecția lui)
+    const t = obstacle.t;
+    const ptOnLine = {
+      x: x1 + ux * (dist * t),
+      y: y1 + uy * (dist * t)
+    };
+    
+    // Calculez ofsetul perpendicular ca să evitez obstacolul
+    const penetration = (nodeRadius + margin) - obstacle.d;
+    const strength = penetration / (nodeRadius + margin);
+    const offsetDistance = strength * (nodeRadius + 30); // distanta de ocolire
+    
+    // Vectorul DE LA PUNCT PE LINIE SPRE OBSTACOL
+    const toObstacleX = obstacle.node.x - ptOnLine.x;
+    const toObstacleY = obstacle.node.y - ptOnLine.y;
+    const toObstacleLen = Math.hypot(toObstacleX, toObstacleY);
+    
+    // Mut punctul de control în DIRECȚIA OPUSĂ obstacolului
+    let offsetX = 0;
+    let offsetY = 0;
+    if (toObstacleLen > 0) {
+      offsetX = -toObstacleX / toObstacleLen * offsetDistance;
+      offsetY = -toObstacleY / toObstacleLen * offsetDistance;
+    }
+    
+    // Creez punctul de control mutat
+    controlPoints.push({
+      x: ptOnLine.x + offsetX,
+      y: ptOnLine.y + offsetY
+    });
+  });
+  
+  controlPoints.push({ x: x2, y: y2 }); // END
+  
+  // Desenez curbă smooth prin aceste puncte-cheie
+  return pointsToSmoothPath(controlPoints);
+}
+
 function GraphEditor() {
   // --- DECLARĂ TOATE STATE-URILE LA ÎNCEPUT ---
   const [nodes, setNodes] = useState([]); // {id, x, y, label}
@@ -187,30 +571,12 @@ function GraphEditor() {
       }
       newPoints.push(pt);
       // Elimină punctele intermediare dacă nodul nu mai e aproape
+      // eslint-disable-next-line no-loop-func
       if (!arcAdded && idx > 0 && newPoints.length > 3) {
         newPoints = newPoints.filter((p, i) => i === 0 || i === newPoints.length - 1);
       }
     }
     return newPoints;
-  }
-  // Verifică dacă linia dreaptă dintre două puncte intersectează vreun nod
-  function isLineClear(x1, y1, x2, y2, nodes, excludeIds = []) {
-    for (const n of nodes) {
-      if (excludeIds.includes(n.id)) continue;
-      // Proiecția punctului pe linie
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) continue;
-      const t = ((n.x - x1) * dx + (n.y - y1) * dy) / (len * len);
-      // Clamp t între 0 și 1
-      const tClamped = Math.max(0, Math.min(1, t));
-      const px = x1 + tClamped * dx;
-      const py = y1 + tClamped * dy;
-      const dist = Math.hypot(px - n.x, py - n.y);
-  if (dist < 60) return false; // distanță de evitare și mai mare
-    }
-    return true;
   }
   // Transformă o listă de puncte într-un path SVG smooth (Catmull-Rom)
   function catmullRom2bezier(points) {
@@ -447,7 +813,6 @@ function GraphEditor() {
   const [editingNodeId, setEditingNodeId] = useState(null);
   const [editingValue, setEditingValue] = useState('');
   // eliminat redeclarare edges, deja definit la început
-  const [selected, setSelected] = useState(null);
   const [addNodeMode, setAddNodeMode] = useState(false);
   const navigate = useNavigate();
 
@@ -621,7 +986,6 @@ function GraphEditor() {
             {addEdgeMode && edgeNodes.length === 1 && edgePreviewPoints.length > 0 && (() => {
               const from = nodes.find(n => n.id === edgeNodes[0]);
               if (!from) return null;
-              const r = 28;
               const x1 = from.x;
               const y1 = from.y;
               const allPoints = [
@@ -644,68 +1008,15 @@ function GraphEditor() {
               const from = nodes.find(n => n.id === edge.from);
               const to = nodes.find(n => n.id === edge.to);
               if (!from || !to) return null;
-              // Start/End pe marginea cercului
-              const r = 28;
-              const dx = to.x - from.x;
-              const dy = to.y - from.y;
-              const dist = Math.hypot(dx, dy);
-              if (dist === 0) return null;
-              const x1 = from.x + (dx * r) / dist;
-              const y1 = from.y + (dy * r) / dist;
-              const x2 = to.x - (dx * r) / dist;
-              const y2 = to.y - (dy * r) / dist;
-              // Dacă linia dreaptă nu intersectează niciun nod, desenează direct
-              if (isLineClear(x1, y1, x2, y2, nodes, [from.id, to.id])) {
-                return (
-                  <>
-                    <line
-                      key={idx}
-                      x1={x1}
-                      y1={y1}
-                      x2={x2}
-                      y2={y2}
-                      stroke="#8b5cf6"
-                      strokeWidth={3}
-                      fill="none"
-                      style={{ cursor: 'pointer' }}
-                      onContextMenu={e => handleEdgeContextMenu(edge, idx, e)}
-                    />
-                    {showDeleteEdge.edgeIdx === idx && (
-                      <foreignObject x={showDeleteEdge.x} y={showDeleteEdge.y} width={32} height={32}>
-                        <button
-                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-                          onClick={() => handleDeleteEdge(idx)}
-                          title="Șterge muchie"
-                        >
-                          <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="6" y="8" width="10" height="8" rx="2" fill="#ede9fe" stroke="#8b5cf6" strokeWidth="1.5"/>
-                            <rect x="8" y="6" width="6" height="2" rx="1" fill="#8b5cf6"/>
-                            <line x1="9" y1="10" x2="9" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
-                            <line x1="11" y1="10" x2="11" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
-                            <line x1="13" y1="10" x2="13" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
-                          </svg>
-                        </button>
-                      </foreignObject>
-                    )}
-                  </>
-                );
-              }
-              // --- Curbă Bezier smooth, control point sub nodul intermediar ---
-              const avoidNode = nodes.filter(n => n.id !== from.id && n.id !== to.id)
-                .map(n => ({
-                  n,
-                  dist: Math.abs((to.x-from.x)*(from.y-n.y)-(from.x-n.x)*(to.y-from.y))/dist
-                }))
-                .sort((a,b) => a.dist-b.dist)[0];
-              let cx, cy;
-              if (avoidNode && avoidNode.dist < 70) {
-                cx = avoidNode.n.x;
-                cy = avoidNode.n.y + 60;
-              } else {
-                cx = (from.x + to.x)/2;
-                cy = (from.y + to.y)/2 + 60;
-              }
-              const pathD = `M ${x1},${y1} Q ${cx},${cy} ${x2},${y2}`;
+
+              // Construiesc path smooth care evită obstacolele
+              const pathD = buildSmoothedPath(
+                from.x, from.y,
+                to.x, to.y,
+                nodes,
+                [from.id, to.id]  // exclud nodurile capete
+              );
+
               return (
                 <>
                   <path
