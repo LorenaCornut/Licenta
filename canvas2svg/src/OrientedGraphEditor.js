@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './GraphEditor.css';
+import './UMLEditor.css';
 import { useNavigate } from 'react-router-dom';
 
 // ============ HELPER FUNCTIONS ============
@@ -509,9 +510,121 @@ function OrientedGraphEditor() {
     }
   }
 
+  // Exportă graficul orientat în format SVG cu săgeți
+  function handleExportSVG() {
+    if (nodes.length === 0) {
+      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
+      return;
+    }
+
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNamespace, 'svg');
+    
+    svg.setAttribute('width', '1000');
+    svg.setAttribute('height', '540');
+    svg.setAttribute('viewBox', '0 0 1000 540');
+    svg.setAttribute('xmlns', svgNamespace);
+    svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    svg.setAttribute('version', '1.1');
+    svg.setAttribute('style', 'background: white;');
+
+    // Background alb
+    const bgRect = document.createElementNS(svgNamespace, 'rect');
+    bgRect.setAttribute('width', '1000');
+    bgRect.setAttribute('height', '540');
+    bgRect.setAttribute('fill', 'white');
+    svg.appendChild(bgRect);
+
+    // Desenez muchiile cu săgeți
+    edges.forEach((edge, idx) => {
+      const from = nodes.find(n => n.id === edge.from);
+      const to = nodes.find(n => n.id === edge.to);
+      
+      if (!from || !to) return;
+
+      // Calculez pathul smooth cu informații despre săgeată
+      const pathResult = buildSmoothedPath(
+        from.x, from.y,
+        to.x, to.y,
+        nodes,
+        [from.id, to.id]
+      );
+
+      const pathD = pathResult.path;
+      const direction = pathResult.direction;
+      const arrowPoint = pathResult.arrowPoint;
+
+      // Desenez linia muchiei
+      const path = document.createElementNS(svgNamespace, 'path');
+      path.setAttribute('d', pathD);
+      path.setAttribute('stroke', '#8b5cf6');
+      path.setAttribute('stroke-width', '3');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('fill', 'none');
+      svg.appendChild(path);
+
+      // Creez și desenez săgeată
+      const arrowPoints = createArrowhead(arrowPoint.x, arrowPoint.y, direction, 18);
+      const polygon = document.createElementNS(svgNamespace, 'polygon');
+      polygon.setAttribute('points', arrowPoints);
+      polygon.setAttribute('fill', '#8b5cf6');
+      svg.appendChild(polygon);
+    });
+
+    // Desenez nodurile
+    nodes.forEach(node => {
+      // Cercul nodului
+      const circle = document.createElementNS(svgNamespace, 'circle');
+      circle.setAttribute('cx', node.x);
+      circle.setAttribute('cy', node.y);
+      circle.setAttribute('r', '28');
+      circle.setAttribute('fill', '#ede9fe');
+      circle.setAttribute('stroke', '#8b5cf6');
+      circle.setAttribute('stroke-width', '3');
+      svg.appendChild(circle);
+
+      // Eticheta nodului
+      if (node.label) {
+        const text = document.createElementNS(svgNamespace, 'text');
+        text.setAttribute('x', node.x);
+        text.setAttribute('y', node.y + 6);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('font-size', '18');
+        text.setAttribute('font-family', 'Arial, sans-serif');
+        text.setAttribute('fill', '#5b21b6');
+        text.setAttribute('font-weight', 'bold');
+        text.textContent = node.label;
+        svg.appendChild(text);
+      }
+    });
+
+    // Convertesc SVG în string
+    let svgString = new XMLSerializer().serializeToString(svg);
+    
+    // Adaug XML declaration și DOCTYPE
+    const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    const doctype = '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n';
+    svgString = xmlDeclaration + doctype + svgString;
+    
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    // Descarcă fișierul SVG
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `graf-orientat-${Date.now()}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    alert('Graficul orientat a fost exportat cu succes!');
+  }
+
   return (
     <div className="graph-editor-root">
-      <button className="graph-back-btn graph-back-btn-abs" onClick={() => navigate('/dashboard')}>Înapoi la Dashboard</button>
+      <button className="btn-back" onClick={() => navigate('/dashboard')} style={{ position: 'absolute', top: '24px', left: '32px', zIndex: 10 }}>← Back</button>
       <div className="graph-editor-header">
         <h2 style={{
           fontFamily: 'Caveat, cursive',
@@ -530,7 +643,7 @@ function OrientedGraphEditor() {
         <button className={`graph-toolbar-btn${addEdgeMode ? ' active' : ''}`} onClick={handleAddEdge}>Adaugă muchie</button>
         <button className="graph-toolbar-btn">Șterge</button>
         <button className="graph-toolbar-btn">Reset</button>
-        <button className="graph-toolbar-btn">Export</button>
+        <button className="graph-toolbar-btn" onClick={handleExportSVG}>Export</button>
         <button className="graph-toolbar-btn" onClick={handleSave}>Salvează</button>
       </div>
       <div className="graph-main-content" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}>

@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import './GraphEditor.css';
+import './UMLEditor.css';
 import { useNavigate } from 'react-router-dom';
 
   // Funcție placeholder pentru butonul Salvează
@@ -44,134 +45,6 @@ function sideOfLine(px, py, x1, y1, x2, y2) {
   return crossProduct > 0 ? 1 : -1;
 }
 
-/**
- * Tesselează o curbă Bezier cubică în puncte discrete
- * @param x0, y0 - START
- * @param x1, y1 - CONTROL POINT 1
- * @param x2, y2 - CONTROL POINT 2
- * @param x3, y3 - END
- * @param numSegments - numărul de segmente (puncte = numSegments + 1)
- * @returns Array de {x, y} puncte de-a lungul curbei
- */
-function tesselateBezierCurve(x0, y0, x1, y1, x2, y2, x3, y3, numSegments = 60) {
-  const points = [];
-  
-  for (let i = 0; i <= numSegments; i++) {
-    const t = i / numSegments;
-    
-    // Formulă Bezier cubică: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
-    const mt = 1 - t;
-    const mt2 = mt * mt;
-    const mt3 = mt2 * mt;
-    const t2 = t * t;
-    const t3 = t2 * t;
-    
-    const x = mt3 * x0 + 3 * mt2 * t * x1 + 3 * mt * t2 * x2 + t3 * x3;
-    const y = mt3 * y0 + 3 * mt2 * t * y1 + 3 * mt * t2 * y2 + t3 * y3;
-    
-    points.push({ x, y });
-  }
-  
-  return points;
-}
-
-/**
- * Ajustează punctele tessellate ale unei curbe pentru a evita coliziuni
- * Pentru fiecare punct, calculez forțe cumulate din TOȚI obstacolele
- * Mutî-l gradual bazat pe cât de adânc e în fiecare obstacol
- * @param tessellatedPoints - Array de {x, y} puncte pe curbă
- * @param obstacleNodes - Array de obstacole {node, d, side, t}
- * @param nodeRadius, margin - parametri de siguranță
- * @returns Array ajustat de {x, y} puncte
- */
-function adjustTessellatedCurveForCollisions(tessellatedPoints, obstacleNodes, nodeRadius, margin) {
-  const adjustedPoints = tessellatedPoints.map(p => ({ ...p }));
-  const safeDistance = nodeRadius + margin;
-  
-  // Pentru fiecare punct tessellat
-  for (let i = 0; i < adjustedPoints.length; i++) {
-    const point = adjustedPoints[i];
-    let totalForceX = 0;
-    let totalForceY = 0;
-    
-    // Verific coliziuni cu TOȚI obstacolele și acumul forțele
-    for (const obstacle of obstacleNodes) {
-      const d = Math.hypot(point.x - obstacle.node.x, point.y - obstacle.node.y);
-      
-      // Dacă e în coliziune
-      if (d < safeDistance) {
-        // Cât de mult penetrează (0 la margine, 1 în centru)
-        const penetration = safeDistance - d;
-        const strength = penetration / safeDistance;
-        
-        // Calculez vectorul de la obstacol la punct
-        const dx = point.x - obstacle.node.x;
-        const dy = point.y - obstacle.node.y;
-        
-        // Normalizez
-        const len = Math.hypot(dx, dy);
-        if (len > 0) {
-          const ux = dx / len;
-          const uy = dy / len;
-          
-          // Forța pentru acest obstacol (proporțional cu penetrație)
-          const forceStrength = strength * (nodeRadius + 15);
-          totalForceX += ux * forceStrength;
-          totalForceY += uy * forceStrength;
-        }
-      }
-    }
-    
-    // Aplica forța cumulată punctului
-    if (totalForceX !== 0 || totalForceY !== 0) {
-      point.x += totalForceX;
-      point.y += totalForceY;
-    }
-  }
-  
-  return adjustedPoints;
-}
-
-/**
- * Aplica smoothing agresiv pe o seriă de puncte folosind moving average
- * Reduce abruptele și colțurile din curbă cu pondere mare pe vecinii
- * @param points - Array de {x, y}
- * @param passes - Numărul de pase de smoothing (default 4)
- * @returns Array smoothat de {x, y}
- */
-function smoothPoints(points, passes = 4) {
-  if (points.length < 3) return points;
-  
-  let current = points.map(p => ({ ...p }));
-  
-  // Aplica smoothing de mai multe ori
-  for (let pass = 0; pass < passes; pass++) {
-    const smoothed = [];
-    
-    // Păstrez punctele de capăt
-    smoothed.push(current[0]);
-    
-    // Pentru fiecare punct interior, calculez media cu vecinii cu pondere mai mare
-    for (let i = 1; i < current.length - 1; i++) {
-      const prev = current[i - 1];
-      const curr = current[i];
-      const next = current[i + 1];
-      
-      // Media cu mai multă influență de la vecinii
-      // Pondere: prev=1, curr=2, next=1 → total 4 (mai blended)
-      smoothed.push({
-        x: (prev.x + 2 * curr.x + next.x) / 4,
-        y: (prev.y + 2 * curr.y + next.y) / 4
-      });
-    }
-    
-    // Păstrez punctul final
-    smoothed.push(current[current.length - 1]);
-    current = smoothed;
-  }
-  
-  return current;
-}
 
 /**
  * Convertește o listă de puncte în SVG path smooth (Catmull-Rom)
@@ -297,7 +170,7 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
       obstacleCount++;
     }
   });
-
+  /*
   // ===== PASUL 3: ALEG offseturile finale pentru c1 și c2 INDEPENDENT =====
   let c1Offset = 0;
   if (c1OffsetUp > c1OffsetDown) {
@@ -344,7 +217,7 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
     x: x1 + ux * (dist * c2_t) + px * c2Offset,
     y: y1 + uy * (dist * c2_t) + py * c2Offset
   };
-
+  */
   // ===== PASUL 7-8: CREATE SINGLE CONTROL POINT PER OBSTACLE =====
   // Creed un singur punct intermediar per obstacol (mutat perpendicular pentru ocolire)
   const controlPoints = [{ x: x1, y: y1 }]; // START
@@ -440,17 +313,132 @@ function GraphEditor() {
       x: cx + r * Math.cos(idx * angleStep - Math.PI/2),
       y: cy + r * Math.sin(idx * angleStep - Math.PI/2)
     }));
-    const edgePairs = assistantEdges.split(/\r?\n/).map(s => s.trim().split(/\s+/)).filter(pair => pair.length === 2);
+    
+    // Validare STRICTĂ a muchiilor - trebuie să aibă exact 2 noduri
+    const edgeLines = assistantEdges.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const edgePairs = [];
+    for (const line of edgeLines) {
+      const parts = line.split(/\s+/);
+      if (parts.length !== 2) {
+        setAssistantError(`Muchie invalidă: "${line}" - trebuie să aibă exact 2 noduri, ai: ${parts.length}`);
+        return;
+      }
+      edgePairs.push(parts);
+    }
+    
     const nodeIds = newNodes.map(n => n.id);
     const invalidEdge = edgePairs.find(([a, b]) => !nodeIds.includes(a) || !nodeIds.includes(b));
     if (invalidEdge) {
-      setAssistantError(`Muchie invalidă: ${invalidEdge.join(" ")}`);
+      setAssistantError(`Muchie invalidă: ${invalidEdge.join(" ")} - noduri care nu există în lista nodurilor dorite`);
       return;
     }
     const newEdges = edgePairs.map(([a, b]) => ({ from: a, to: b }));
     setNodes(newNodes);
     setEdges(newEdges);
   }
+
+  // Exportă graficul în format SVG
+  function handleExportSVG() {
+    if (nodes.length === 0) {
+      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
+      return;
+    }
+
+    // Creez un SVG element
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNamespace, 'svg');
+    
+    // Setez dimensiunile și alte atribute standard SVG
+    svg.setAttribute('width', '1000');
+    svg.setAttribute('height', '540');
+    svg.setAttribute('viewBox', '0 0 1000 540');
+    svg.setAttribute('xmlns', svgNamespace);
+    svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    svg.setAttribute('version', '1.1');
+    svg.setAttribute('style', 'background: white;');
+
+    // Adaug un background alb
+    const bgRect = document.createElementNS(svgNamespace, 'rect');
+    bgRect.setAttribute('width', '1000');
+    bgRect.setAttribute('height', '540');
+    bgRect.setAttribute('fill', 'white');
+    svg.appendChild(bgRect);
+
+    // Desenez muchiile (paths)
+    edges.forEach((edge, idx) => {
+      const from = nodes.find(n => n.id === edge.from);
+      const to = nodes.find(n => n.id === edge.to);
+      
+      if (!from || !to) return;
+
+      // Calculez pathul smooth
+      const pathD = buildSmoothedPath(
+        from.x, from.y,
+        to.x, to.y,
+        nodes,
+        [from.id, to.id]
+      );
+
+      const path = document.createElementNS(svgNamespace, 'path');
+      path.setAttribute('d', pathD);
+      path.setAttribute('stroke', '#8b5cf6');
+      path.setAttribute('stroke-width', '3');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('fill', 'none');
+      svg.appendChild(path);
+    });
+
+    // Desenez nodurile
+    nodes.forEach(node => {
+      // Cercul nodului
+      const circle = document.createElementNS(svgNamespace, 'circle');
+      circle.setAttribute('cx', node.x);
+      circle.setAttribute('cy', node.y);
+      circle.setAttribute('r', '28');
+      circle.setAttribute('fill', '#ede9fe');
+      circle.setAttribute('stroke', '#8b5cf6');
+      circle.setAttribute('stroke-width', '3');
+      svg.appendChild(circle);
+
+      // Eticheta nodului
+      if (node.label) {
+        const text = document.createElementNS(svgNamespace, 'text');
+        text.setAttribute('x', node.x);
+        text.setAttribute('y', node.y + 6);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('font-size', '18');
+        text.setAttribute('font-family', 'Arial, sans-serif');
+        text.setAttribute('fill', '#5b21b6');
+        text.setAttribute('font-weight', 'bold');
+        text.textContent = node.label;
+        svg.appendChild(text);
+      }
+    });
+
+    // Convertesc SVG în string, adaug XML declaration și DOCTYPE, apoi descarcă
+    let svgString = new XMLSerializer().serializeToString(svg);
+    
+    // Adaug XML declaration și DOCTYPE pentru conformitate SVG 1.1
+    const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    const doctype = '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n';
+    svgString = xmlDeclaration + doctype + svgString;
+    
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    // Creez un link pentru descărcare
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `graf-neorientat-${Date.now()}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    alert('Graficul a fost exportat cu succes!');
+  }
+
   const [showDeleteEdge, setShowDeleteEdge] = useState({ edgeIdx: null, x: 0, y: 0 });
 
   function handleEdgeContextMenu(edge, idx, e) {
@@ -949,7 +937,7 @@ function GraphEditor() {
 
   return (
   <div className="graph-editor-root">
-      <button className="graph-back-btn graph-back-btn-abs" onClick={() => navigate('/dashboard')}>Înapoi la Dashboard</button>
+      <button className="btn-back" onClick={() => navigate('/dashboard')} style={{ position: 'absolute', top: '24px', left: '32px', zIndex: 10 }}>← Back</button>
       <div className="graph-editor-header">
         <h2 style={{
           fontFamily: 'Caveat, cursive',
@@ -968,7 +956,7 @@ function GraphEditor() {
         <button className={`graph-toolbar-btn${addEdgeMode ? ' active' : ''}`} onClick={handleAddEdge}>Adaugă muchie</button>
         <button className="graph-toolbar-btn">Șterge</button>
         <button className="graph-toolbar-btn">Reset</button>
-  <button className="graph-toolbar-btn">Export</button>
+  <button className="graph-toolbar-btn" onClick={handleExportSVG}>Export</button>
   <button className="graph-toolbar-btn" onClick={handleSave}>Salvează</button>
       </div>
       <div className="graph-main-content" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}>
@@ -1110,12 +1098,12 @@ function GraphEditor() {
             ))}
           </svg>
         </div>
-  <div className="graph-assistant-panel" style={{ minWidth: 280, maxWidth: 360, background: '#fff', borderRadius: 18, boxShadow: '0 2px 12px rgba(80,80,160,0.10)', padding: '22px 22px 0 22px', marginLeft: 24, marginRight: 32, display: 'flex', flexDirection: 'column', gap: 12, height: '520px' }}>
+  <div className="graph-assistant-panel" style={{ minWidth: 280, width: 360, background: '#fff', borderRadius: 18, boxShadow: '0 2px 12px rgba(80,80,160,0.10)', padding: '22px 22px 0 22px', marginLeft: 24, marginRight: 32, display: 'flex', flexDirection: 'column', gap: 12, height: '520px', overflowY: 'auto', boxSizing: 'border-box' }}>
           <div className="graph-assistant-title" style={{ fontSize: '1.2rem', fontWeight: 700, color: '#5b21b6', marginBottom: 8 }}>Vrei să te ajut?</div>
           <div className="graph-assistant-label" style={{ fontSize: '1rem', fontWeight: 600, color: '#3c1a6e', marginBottom: 2 }}>Nodurile dorite:</div>
-          <textarea className="graph-assistant-input" rows={5} value={assistantNodes} onChange={e => setAssistantNodes(e.target.value)} placeholder={"A\nB\nC"} style={{ width: '100%', minHeight: 60, maxHeight: 120, resize: 'vertical', borderRadius: 8, border: '1px solid #d1c4e9', padding: '8px 10px', fontSize: '1rem', fontFamily: 'inherit', boxSizing: 'border-box', overflowY: 'auto' }} />
+          <textarea className="graph-assistant-input" rows={5} value={assistantNodes} onChange={e => setAssistantNodes(e.target.value)} placeholder={"A\nB\nC"} style={{ width: '100%', minHeight: 80, maxHeight: 120, resize: 'none', borderRadius: 8, border: '1px solid #d1c4e9', padding: '8px 10px', fontSize: '1rem', fontFamily: 'inherit', boxSizing: 'border-box', overflowY: 'auto', flexShrink: 0 }} />
           <div className="graph-assistant-label" style={{ fontSize: '1rem', fontWeight: 600, color: '#3c1a6e', marginBottom: 2 }}>Muchiile dorite:</div>
-          <textarea className="graph-assistant-input" rows={5} value={assistantEdges} onChange={e => setAssistantEdges(e.target.value)} placeholder={"A B\nC D"} style={{ width: '100%', minHeight: 60, maxHeight: 120, resize: 'vertical', borderRadius: 8, border: '1px solid #d1c4e9', padding: '8px 10px', fontSize: '1rem', fontFamily: 'inherit', boxSizing: 'border-box', overflowY: 'auto' }} />
+          <textarea className="graph-assistant-input" rows={5} value={assistantEdges} onChange={e => setAssistantEdges(e.target.value)} placeholder={"A B\nC D"} style={{ width: '100%', minHeight: 80, maxHeight: 120, resize: 'none', borderRadius: 8, border: '1px solid #d1c4e9', padding: '8px 10px', fontSize: '1rem', fontFamily: 'inherit', boxSizing: 'border-box', overflowY: 'auto', flexShrink: 0 }} />
           <button className="graph-assistant-btn" onClick={handleAssistantDraw} style={{ background: '#ede9fe', border: 'none', borderRadius: 10, color: '#5b21b6', fontSize: '1rem', fontWeight: 600, padding: '8px 18px', cursor: 'pointer', marginTop: 6, boxShadow: '0 2px 8px rgba(80,80,160,0.10)', transition: 'background 0.2s, box-shadow 0.2s' }}>Desenează</button>
           {assistantError && <div className="graph-assistant-error" style={{ color: '#b91c1c', fontSize: '0.98rem', marginTop: 4, fontWeight: 500 }}>{assistantError}</div>}
         </div>
