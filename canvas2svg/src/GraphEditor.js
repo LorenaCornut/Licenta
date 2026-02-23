@@ -273,6 +273,23 @@ function GraphEditor() {
   const [assistantNodes, setAssistantNodes] = useState("");
   const [assistantEdges, setAssistantEdges] = useState("");
   const [assistantError, setAssistantError] = useState("");
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const fileInputRef = React.useRef(null);
+  const exportMenuRef = React.useRef(null);
+
+  // Închide meniul de export când se dă click în alt loc
+  React.useEffect(() => {
+    function handleClickOutside(event) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setShowExportMenu(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Sincronizează muchiile din graf cu textarea 'muchiile dorite', doar dacă ambele noduri au text
   React.useEffect(() => {
@@ -335,6 +352,96 @@ function GraphEditor() {
     const newEdges = edgePairs.map(([a, b]) => ({ from: a, to: b }));
     setNodes(newNodes);
     setEdges(newEdges);
+  }
+
+  // Importă graficul din fișier JSON
+  function handleImportJSON(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        
+        if (!data.nodes || !Array.isArray(data.nodes)) {
+          alert('Format JSON invalid. Trebuie să ai o proprietate "nodes" ca array!');
+          return;
+        }
+        
+        if (!data.edges || !Array.isArray(data.edges)) {
+          alert('Format JSON invalid. Trebuie să ai o proprietate "edges" ca array!');
+          return;
+        }
+
+        // Validez nodurile
+        const hasValidNodes = data.nodes.every(node => 
+          node.id !== undefined && 
+          node.label !== undefined && 
+          typeof node.x === 'number' && 
+          typeof node.y === 'number'
+        );
+
+        if (!hasValidNodes) {
+          alert('Fiecare nod trebuie să aibă: id, label, x (număr), y (număr)');
+          return;
+        }
+
+        // Validez muchiile
+        const nodeIds = new Set(data.nodes.map(n => n.id));
+        const hasValidEdges = data.edges.every(edge => 
+          edge.from !== undefined && 
+          edge.to !== undefined &&
+          nodeIds.has(edge.from) &&
+          nodeIds.has(edge.to)
+        );
+
+        if (!hasValidEdges) {
+          alert('Fiecare muchie trebuie să aibă "from" și "to" care să trimită la noduri existente!');
+          return;
+        }
+
+        // Încarcă datele în editor
+        setNodes(data.nodes);
+        setEdges(data.edges);
+        alert('Graficul a fost importat cu succes!');
+      } catch (error) {
+        alert(`Eroare la parsare JSON: ${error.message}`);
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+
+  // Exportă graficul în format JSON
+  function handleExportJSON() {
+    if (nodes.length === 0) {
+      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
+      return;
+    }
+
+    const graphData = {
+      nodes: nodes,
+      edges: edges
+    };
+
+    const jsonString = JSON.stringify(graphData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `graf-neorientat-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    alert('Graficul a fost exportat cu succes!');
   }
 
   // Exportă graficul în format SVG
@@ -956,7 +1063,85 @@ function GraphEditor() {
         <button className={`graph-toolbar-btn${addEdgeMode ? ' active' : ''}`} onClick={handleAddEdge}>Adaugă muchie</button>
         <button className="graph-toolbar-btn">Șterge</button>
         <button className="graph-toolbar-btn">Reset</button>
-  <button className="graph-toolbar-btn" onClick={handleExportSVG}>Export</button>
+        <button className="graph-toolbar-btn" onClick={() => fileInputRef.current?.click()}>Importă JSON</button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          style={{ display: 'none' }}
+          onChange={handleImportJSON}
+        />
+        <div ref={exportMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
+          <button 
+            className="graph-toolbar-btn" 
+            onClick={() => setShowExportMenu(!showExportMenu)}
+          >
+            Export
+          </button>
+          {showExportMenu && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              background: 'white',
+              border: '1px solid #d1c4e9',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(80,80,160,0.15)',
+              zIndex: 100,
+              minWidth: '150px',
+              marginTop: '4px'
+            }}>
+              <button
+                onClick={() => {
+                  handleExportJSON();
+                  setShowExportMenu(false);
+                }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '10px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: '#5b21b6',
+                  fontSize: '1rem',
+                  fontWeight: 500,
+                  borderRadius: '8px',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.target.style.background = '#f3e8ff'}
+                onMouseLeave={e => e.target.style.background = 'transparent'}
+              >
+                JSON
+              </button>
+              <button
+                onClick={() => {
+                  handleExportSVG();
+                  setShowExportMenu(false);
+                }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '10px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: '#5b21b6',
+                  fontSize: '1rem',
+                  fontWeight: 500,
+                  borderRadius: '8px',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.target.style.background = '#f3e8ff'}
+                onMouseLeave={e => e.target.style.background = 'transparent'}
+              >
+                SVG
+              </button>
+            </div>
+          )}
+        </div>
   <button className="graph-toolbar-btn" onClick={handleSave}>Salvează</button>
       </div>
       <div className="graph-main-content" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}>
