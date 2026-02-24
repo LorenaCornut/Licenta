@@ -28,8 +28,11 @@ function App() {
         <Route path="/info" element={<Info />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/graph" element={<GraphEditor />} />
+        <Route path="/graph/:diagramId" element={<GraphEditor />} />
         <Route path="/orientedgraph" element={<OrientedGraphEditor />} />
+        <Route path="/orientedgraph/:diagramId" element={<OrientedGraphEditor />} />
         <Route path="/uml" element={<UMLEditor />} />
+        <Route path="/uml/:diagramId" element={<UMLEditor />} />
       </Routes>
     </Router>
   );

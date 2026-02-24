@@ -35,6 +35,11 @@ function CreateAccount() {
         setError(data.message || 'Eroare la crearea contului!');
         return;
       }
+      // Salvează datele utilizatorului în localStorage
+      if (data.user) {
+        localStorage.setItem('username', data.user.username);
+        localStorage.setItem('userId', data.user.id);
+      }
   // Succes: cont creat
  /// alert('Cont creat cu succes!');
   navigate('/dashboard');

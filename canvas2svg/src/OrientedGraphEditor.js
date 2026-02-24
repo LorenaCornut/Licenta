@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './GraphEditor.css';
 import './UMLEditor.css';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 // ============ HELPER FUNCTIONS ============
 
@@ -260,11 +260,10 @@ function createArrowhead(arrowX, arrowY, direction, size = 15) {
   return `${p1} ${p2} ${p3}`;
 }
 
-function handleSave() {
-  alert('Funcția de salvare nu este implementată încă.');
-}
-
 function OrientedGraphEditor() {
+  const { diagramId } = useParams();
+  const navigate = useNavigate();
+  
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [edgePreviewPoints, setEdgePreviewPoints] = useState([]);
@@ -281,9 +280,126 @@ function OrientedGraphEditor() {
   const [assistantEdges, setAssistantEdges] = useState("");
   const [assistantError, setAssistantError] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [diagramTitle, setDiagramTitle] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = React.useRef(null);
   const exportMenuRef = React.useRef(null);
-  const navigate = useNavigate();
+
+  // Încărcă diagrama dacă există un ID în URL
+  useEffect(() => {
+    if (diagramId) {
+      loadDiagram(diagramId);
+    }
+  }, [diagramId]);
+
+  // Funcție pentru a încărca o diagramă din baza de date
+  async function loadDiagram(id) {
+    setIsLoading(true);
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/diagrams/${id}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setNodes(data.nodes || []);
+        setEdges(data.edges || []);
+        setDiagramTitle(data.diagram?.title || '');
+        setCurrentDiagramId(id);
+        
+        const nodeLabels = (data.nodes || []).map(n => n.label).filter(Boolean);
+        setAssistantNodes(nodeLabels.join('\n'));
+        
+        const edgeLabels = (data.edges || []).map(e => {
+          const fromNode = (data.nodes || []).find(n => n.id === e.from);
+          const toNode = (data.nodes || []).find(n => n.id === e.to);
+          if (fromNode?.label && toNode?.label) {
+            return `${fromNode.label} ${toNode.label}`;
+          }
+          return null;
+        }).filter(Boolean);
+        setAssistantEdges(edgeLabels.join('\n'));
+      } else {
+        alert(data.message || 'Eroare la încărcarea diagramei!');
+      }
+    } catch (err) {
+      alert('Eroare de rețea sau server!');
+    }
+    setIsLoading(false);
+  }
+
+  // Funcție pentru salvarea diagramei în baza de date
+  async function handleSave() {
+    const userId = localStorage.getItem('userId');
+    if (!userId || userId === 'null' || userId === 'undefined') {
+      alert('Trebuie să te autentifici din nou pentru a salva diagrama!');
+      return;
+    }
+    
+    if (nodes.length === 0) {
+      alert('Nu ai niciun nod în diagramă. Adaugă cel puțin un nod înainte de a salva!');
+      return;
+    }
+    
+    setShowSaveModal(true);
+    setSaveError("");
+  }
+
+  // Funcție pentru confirmarea salvării
+  async function confirmSave() {
+    if (!diagramTitle.trim()) {
+      setSaveError('Te rog introdu un nume pentru diagramă!');
+      return;
+    }
+
+    const userId = localStorage.getItem('userId');
+    if (!userId || userId === 'null' || userId === 'undefined') {
+      setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError("");
+
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+      const response = await fetch(`${apiUrl}/api/diagrams/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: parseInt(userId),
+          title: diagramTitle.trim(),
+          tipDiagrama: 'Graf orientat',
+          nodes: nodes,
+          edges: edges,
+          diagramId: currentDiagramId
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setSaveError(data.message || 'Eroare la salvarea diagramei!');
+        setIsSaving(false);
+        return;
+      }
+
+      setShowSaveModal(false);
+      setIsSaving(false);
+      if (data.diagramId && !currentDiagramId) {
+        setCurrentDiagramId(data.diagramId);
+      }
+      alert('Diagrama a fost salvată cu succes!');
+
+    } catch (err) {
+      setSaveError('Eroare de rețea sau server!');
+      setIsSaving(false);
+    }
+  }
 
   // Închide meniul de export când se face click în afară
   React.useEffect(() => {
@@ -726,6 +842,26 @@ function OrientedGraphEditor() {
     alert('Graficul orientat a fost exportat cu succes!');
   }
 
+  // Indicator de loading
+  if (isLoading) {
+    return (
+      <div className="graph-editor-root" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.5rem', color: '#5b21b6', marginBottom: '16px' }}>Se încarcă diagrama...</div>
+          <div style={{ 
+            width: '50px', 
+            height: '50px', 
+            border: '4px solid #ede9fe', 
+            borderTop: '4px solid #8b5cf6', 
+            borderRadius: '50%', 
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto'
+          }} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="graph-editor-root">
       <button className="btn-back" onClick={() => navigate('/dashboard')} style={{ position: 'absolute', top: '24px', left: '32px', zIndex: 10 }}>← Back</button>
@@ -740,7 +876,7 @@ function OrientedGraphEditor() {
           backgroundClip: 'text',
           color: 'transparent',
           marginBottom: 0
-        }}>Editor graf orientat</h2>
+        }}>{currentDiagramId ? `Editor: ${diagramTitle}` : 'Editor graf orientat'}</h2>
       </div>
       <div className="graph-toolbar" style={{ width: '100%', justifyContent: 'flex-start', margin: 5, paddingLeft: 240, marginBottom: 32 }}>
         <button className={`graph-toolbar-btn${addNodeMode ? ' active' : ''}`} onClick={handleAddNode}>Adaugă nod</button>
@@ -987,6 +1123,111 @@ function OrientedGraphEditor() {
           {assistantError && <div className="graph-assistant-error" style={{ color: '#b91c1c', fontSize: '0.98rem', marginTop: 4, fontWeight: 500 }}>{assistantError}</div>}
         </div>
       </div>
+
+      {/* Modal pentru salvarea diagramei */}
+      {showSaveModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: '32px 40px',
+            minWidth: 350,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
+          }}>
+            <h3 style={{ 
+              margin: '0 0 20px 0', 
+              color: '#5b21b6',
+              fontSize: '1.4rem'
+            }}>Salvează diagrama</h3>
+            
+            <label style={{ 
+              display: 'block', 
+              marginBottom: 8, 
+              fontWeight: 600,
+              color: '#3c1a6e'
+            }}>
+              Nume diagramă:
+            </label>
+            <input
+              type="text"
+              value={diagramTitle}
+              onChange={(e) => setDiagramTitle(e.target.value)}
+              placeholder="Ex: Proiectul meu"
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid #d1c4e9',
+                fontSize: '1rem',
+                marginBottom: 16,
+                boxSizing: 'border-box'
+              }}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmSave();
+                if (e.key === 'Escape') setShowSaveModal(false);
+              }}
+            />
+            
+            {saveError && (
+              <div style={{ 
+                color: '#b91c1c', 
+                marginBottom: 16,
+                fontSize: '0.95rem'
+              }}>
+                {saveError}
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowSaveModal(false);
+                  setDiagramTitle("");
+                  setSaveError("");
+                }}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 8,
+                  border: '1px solid #d1c4e9',
+                  background: '#fff',
+                  color: '#5b21b6',
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                Anulează
+              </button>
+              <button
+                onClick={confirmSave}
+                disabled={isSaving}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: isSaving ? '#c4b5fd' : '#7c3aed',
+                  color: '#fff',
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                {isSaving ? 'Se salvează...' : 'Salvează'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

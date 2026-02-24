@@ -8,12 +8,20 @@ import './Dashboard.css';
 function Dashboard() {
   // Ia username-ul din localStorage (setat la login)
   const userName = localStorage.getItem('username') || '';
+  const userId = localStorage.getItem('userId');
   const navigate = useNavigate();
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   const createBtnRef = useRef(null);
   const profileBtnRef = useRef(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  
+  // State pentru meniul Pornire (diagrame salvate)
+  const [showStartMenu, setShowStartMenu] = useState(false);
+  const [savedDiagrams, setSavedDiagrams] = useState([]);
+  const [loadingDiagrams, setLoadingDiagrams] = useState(false);
+  const startMenuRef = useRef(null);
+  const startBtnRef = useRef(null);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -31,8 +39,15 @@ function Dashboard() {
       ) {
         setShowProfileMenu(false);
       }
+      if (
+        startMenuRef.current &&
+        !startMenuRef.current.contains(event.target) &&
+        !startBtnRef.current.contains(event.target)
+      ) {
+        setShowStartMenu(false);
+      }
     }
-    if (showMenu || showProfileMenu) {
+    if (showMenu || showProfileMenu || showStartMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     } else {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -40,9 +55,65 @@ function Dashboard() {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showMenu, showProfileMenu]);
+  }, [showMenu, showProfileMenu, showStartMenu]);
 
   const profileMenuRef = useRef(null);
+
+  // Funcție pentru a obține diagramele salvate
+  async function fetchSavedDiagrams() {
+    if (!userId) {
+      alert('Trebuie să fii autentificat pentru a vedea diagramele salvate!');
+      return;
+    }
+    
+    setLoadingDiagrams(true);
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/diagrams/user/${userId}`);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setSavedDiagrams(data.diagrams || []);
+        setShowStartMenu(true);
+      } else {
+        alert(data.message || 'Eroare la încărcarea diagramelor!');
+      }
+    } catch (err) {
+      alert('Eroare de rețea sau server!');
+    }
+    setLoadingDiagrams(false);
+  }
+
+  // Funcție pentru a deschide o diagramă
+  function openDiagram(diagram) {
+    setShowStartMenu(false);
+    
+    // Navighează la editorul corespunzător tipului
+    const type = diagram.nume_tip?.toLowerCase() || '';
+    
+    if (type.includes('neorientat')) {
+      navigate(`/graph/${diagram.id_diagrama}`);
+    } else if (type.includes('orientat')) {
+      navigate(`/orientedgraph/${diagram.id_diagrama}`);
+    } else if (type.includes('uml')) {
+      navigate(`/uml/${diagram.id_diagrama}`);
+    } else {
+      // Default: graf neorientat
+      navigate(`/graph/${diagram.id_diagrama}`);
+    }
+  }
+
+  // Formatare dată
+  function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ro-RO', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
 
   function handleHelp() {
     navigate('/help');
@@ -52,8 +123,8 @@ function Dashboard() {
   }
   function handleLogout() {
     // Exemplu: șterge userul din localStorage/context
-    // localStorage.removeItem('user');
-    // navigate('/');
+    localStorage.removeItem('username');
+    localStorage.removeItem('userId');
     navigate('/');
   }
 
@@ -91,12 +162,68 @@ function Dashboard() {
           )}
         </div>
     <div className="sidebar-icon-group">
-          <button className="sidebar-icon-btn" aria-label="Pornire">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M14 6L22 12V22H6V12L14 6Z" stroke="#5b21b6" strokeWidth="2" fill="none"/>
-            </svg>
-            <span className="sidebar-btn-label">Pornire</span>
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button 
+              className="sidebar-icon-btn" 
+              aria-label="Pornire"
+              ref={startBtnRef}
+              onClick={fetchSavedDiagrams}
+            >
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14 6L22 12V22H6V12L14 6Z" stroke="#5b21b6" strokeWidth="2" fill="none"/>
+              </svg>
+              <span className="sidebar-btn-label">{loadingDiagrams ? 'Se încarcă...' : 'Pornire'}</span>
+            </button>
+            {showStartMenu && (
+              <div 
+                className="create-menu-dropdown" 
+                ref={startMenuRef}
+                style={{ 
+                  minWidth: '280px', 
+                  maxHeight: '400px', 
+                  overflowY: 'auto',
+                  left: '100%',
+                  marginLeft: '8px'
+                }}
+              >
+                <div style={{ 
+                  padding: '10px 14px', 
+                  fontWeight: 700, 
+                  color: '#5b21b6', 
+                  borderBottom: '1px solid #e9d5ff',
+                  fontSize: '1.05rem'
+                }}>
+                  Diagramele tale salvate
+                </div>
+                {savedDiagrams.length === 0 ? (
+                  <div style={{ padding: '16px 14px', color: '#6b7280', textAlign: 'center' }}>
+                    Nu ai diagrame salvate încă.
+                  </div>
+                ) : (
+                  savedDiagrams.map(diagram => (
+                    <button 
+                      key={diagram.id_diagrama}
+                      className="create-menu-btn"
+                      onClick={() => openDiagram(diagram)}
+                      style={{ 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        alignItems: 'flex-start',
+                        padding: '12px 14px',
+                        gap: '4px'
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: '#3c1a6e' }}>{diagram.titlu}</span>
+                      <span style={{ fontSize: '0.85rem', color: '#8b5cf6' }}>{diagram.nume_tip}</span>
+                      <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                        Modificat: {formatDate(diagram.data_update)}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
           <button className="sidebar-icon-btn" aria-label="Proiecte">
             <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect x="5" y="8" width="18" height="12" rx="3" stroke="#5b21b6" strokeWidth="2" fill="none"/>

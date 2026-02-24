@@ -11,7 +11,7 @@ exports.login = async (req, res) => {
     }
     isLoggedIn = 1;
     loggedInUsername = username;
-    return res.status(200).json({ message: 'autentificare reusita', user: { username: user.username, email: user.email }, isLoggedIn, loggedInUsername });
+    return res.status(200).json({ message: 'autentificare reusita', user: { id: user.id_user, username: user.username, email: user.email }, isLoggedIn, loggedInUsername });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Eroare server', error: err.message });
@@ -44,7 +44,7 @@ exports.register = async (req, res) => {
     // Setează variabilele de stare
     isLoggedIn = 1;
     loggedInUsername = username;
-    return res.status(201).json({ message: 'cont creat cu succes', user: { username, email }, isLoggedIn, loggedInUsername });
+    return res.status(201).json({ message: 'cont creat cu succes', user: { id: newUser.id_user, username, email }, isLoggedIn, loggedInUsername });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Eroare server', error: err.message });
