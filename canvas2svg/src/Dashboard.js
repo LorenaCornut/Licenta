@@ -22,6 +22,23 @@ function Dashboard() {
   const [loadingDiagrams, setLoadingDiagrams] = useState(false);
   const startMenuRef = useRef(null);
   const startBtnRef = useRef(null);
+  
+  // State pentru poza de profil
+  const [profilePicture, setProfilePicture] = useState('');
+
+  // Fetch profile picture la mount
+  useEffect(() => {
+    if (userId) {
+      fetch(`http://localhost:5000/api/auth/profile/${userId}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.profile_picture) {
+            setProfilePicture(data.profile_picture);
+          }
+        })
+        .catch(err => console.error('Error fetching profile:', err));
+    }
+  }, [userId]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -61,6 +78,12 @@ function Dashboard() {
 
   // Funcție pentru a obține diagramele salvate
   async function fetchSavedDiagrams() {
+    // Dacă meniul e deja deschis, doar îl închidem
+    if (showStartMenu) {
+      setShowStartMenu(false);
+      return;
+    }
+    
     if (!userId) {
       alert('Trebuie să fii autentificat pentru a vedea diagramele salvate!');
       return;
@@ -140,7 +163,7 @@ function Dashboard() {
         </button>
   <div style={{ position: 'relative' }}>
           <button
-            className="sidebar-icon-btn"
+            className={`sidebar-icon-btn${showMenu ? ' active' : ''}`}
             aria-label="Creează"
             ref={createBtnRef}
             onClick={() => setShowMenu((v) => !v)}
@@ -164,15 +187,16 @@ function Dashboard() {
     <div className="sidebar-icon-group">
           <div style={{ position: 'relative' }}>
             <button 
-              className="sidebar-icon-btn" 
+              className={`sidebar-icon-btn${showStartMenu ? ' active' : ''}`}
               aria-label="Pornire"
               ref={startBtnRef}
               onClick={fetchSavedDiagrams}
             >
               <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M14 6L22 12V22H6V12L14 6Z" stroke="#5b21b6" strokeWidth="2" fill="none"/>
+                <path d="M14 5L23 12V23H5V12L14 5Z" fill="#5b21b6"/>
+                <path d="M14 7L21 13V21H7V13L14 7Z" fill="#ede9fe"/>
               </svg>
-              <span className="sidebar-btn-label">{loadingDiagrams ? 'Se încarcă...' : 'Pornire'}</span>
+              <span className="sidebar-btn-label">Pornire</span>
             </button>
             {showStartMenu && (
               <div 
@@ -256,23 +280,31 @@ function Dashboard() {
             ref={profileBtnRef}
             onClick={() => setShowProfileMenu((v) => !v)}
           >
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="18" cy="18" r="16" stroke="#8b5cf6" strokeWidth="2" fill="#ede9fe"/>
-              <circle cx="18" cy="15" r="5" stroke="#8b5cf6" strokeWidth="2" fill="#fff"/>
-              <path d="M10 28c0-4 8-4 8-4s8 0 8 4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
-            </svg>
+            {profilePicture ? (
+              <img src={profilePicture} alt="Profil" className="sidebar-profile-img" />
+            ) : (
+              <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="18" cy="18" r="16" stroke="#8b5cf6" strokeWidth="2" fill="#ede9fe"/>
+                <circle cx="18" cy="15" r="5" stroke="#8b5cf6" strokeWidth="2" fill="#fff"/>
+                <path d="M10 28c0-4 8-4 8-4s8 0 8 4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
+              </svg>
+            )}
           </button>
           {showProfileMenu && (
             <div className="profile-menu-dropdown profile-menu-dropdown-right" ref={profileMenuRef}>
               <div className="profile-menu-header">
-                <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="18" cy="18" r="16" stroke="#8b5cf6" strokeWidth="2" fill="#ede9fe"/>
-                  <circle cx="18" cy="15" r="5" stroke="#8b5cf6" strokeWidth="2" fill="#fff"/>
-                  <path d="M10 28c0-4 8-4 8-4s8 0 8 4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
-                </svg>
+                {profilePicture ? (
+                  <img src={profilePicture} alt="Profil" className="profile-menu-img" />
+                ) : (
+                  <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="18" cy="18" r="16" stroke="#8b5cf6" strokeWidth="2" fill="#ede9fe"/>
+                    <circle cx="18" cy="15" r="5" stroke="#8b5cf6" strokeWidth="2" fill="#fff"/>
+                    <path d="M10 28c0-4 8-4 8-4s8 0 8 4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
+                  </svg>
+                )}
                 <span className="profile-menu-username">{userName}</span>
               </div>
-              <button className="profile-menu-btn">Setări</button>
+              <button className="profile-menu-btn" onClick={() => navigate('/settings')}>Setări</button>
               <button className="profile-menu-btn" onClick={handleHelp}>Help</button>
               <button className="profile-menu-btn" onClick={handleInfo}>Info</button>
               <button className="profile-menu-btn" onClick={handleLogout}>Deconectare</button>

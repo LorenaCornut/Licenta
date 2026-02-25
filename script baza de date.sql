@@ -62,4 +62,6 @@ CREATE TABLE colaboratori (
     PRIMARY KEY (id_diagrama, id_user)
 );
 
+ALTER TABLE users ADD COLUMN profile_picture TEXT;
+
 SELECT * FROM users;

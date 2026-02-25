@@ -70,6 +70,81 @@ function pointsToSmoothPath(points) {
 }
 
 /**
+ * Calculează raza nodului în funcție de lungimea etichetei
+ * @param label - eticheta nodului
+ * @returns raza nodului în pixeli
+ */
+const BASE_NODE_RADIUS = 28;
+const MAX_CHARS_PER_LINE = 5;
+const MAX_TOTAL_CHARS = 10; // maxim 10 caractere total în nod
+
+function getNodeRadius(label) {
+  if (!label) return BASE_NODE_RADIUS;
+  
+  const lines = splitTextIntoLines(label, MAX_CHARS_PER_LINE);
+  const maxLineLength = Math.max(...lines.map(l => l.length));
+  
+  // Calculez raza bazată pe cel mai lung rând
+  // Aproximativ 9px per caracter pentru fontul de 16px
+  const textWidth = maxLineLength * 9;
+  const minRadiusForText = textWidth / 2 + 10; // padding
+  
+  // Dacă avem mai multe rânduri, trebuie să mărim și pentru înălțime
+  const lineHeight = 16;
+  const totalTextHeight = lines.length * lineHeight;
+  const minRadiusForHeight = totalTextHeight / 2 + 8;
+  
+  // Raza finală este maximul dintre toate cerințele (max 55px)
+  return Math.min(55, Math.max(BASE_NODE_RADIUS, minRadiusForText, minRadiusForHeight));
+}
+
+/**
+ * Împarte textul în mai multe linii dacă este prea lung
+ * @param text - textul de împărțit
+ * @param maxCharsPerLine - numărul maxim de caractere per linie
+ * @returns array de linii
+ */
+function splitTextIntoLines(text, maxCharsPerLine) {
+  if (!text) return [''];
+  
+  // Trunchează textul dacă e prea lung
+  let truncatedText = text;
+  if (text.length > MAX_TOTAL_CHARS) {
+    truncatedText = text.substring(0, MAX_TOTAL_CHARS - 2) + '..';
+  }
+  
+  if (truncatedText.length <= maxCharsPerLine) return [truncatedText];
+  
+  const lines = [];
+  let remaining = truncatedText;
+  
+  while (remaining.length > 0) {
+    if (remaining.length <= maxCharsPerLine) {
+      lines.push(remaining);
+      break;
+    }
+    
+    // Încerc să tai la un spațiu dacă există
+    let cutIndex = maxCharsPerLine;
+    const spaceIndex = remaining.lastIndexOf(' ', maxCharsPerLine);
+    if (spaceIndex > 0) {
+      cutIndex = spaceIndex;
+    }
+    
+    lines.push(remaining.substring(0, cutIndex).trim());
+    remaining = remaining.substring(cutIndex).trim();
+  }
+  
+  // Limitez la maxim 3 linii
+  if (lines.length > 3) {
+    lines.length = 3;
+    lines[2] = lines[2].substring(0, maxCharsPerLine - 2) + '..';
+  }
+  
+  return lines;
+}
+
+/**
  * Construiește un path Bezier cubic SMOOTH care evită obstacolele (noduri)
  * @param x1, y1 - START
  * @param x2, y2 - END
@@ -78,7 +153,6 @@ function pointsToSmoothPath(points) {
  * @returns SVG path string pentru Bezier cubic
  */
 function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
-  const nodeRadius = 28;
   const margin = 30; // buffer în jurul nodului
 
   // Calculez direcția și lungimea
@@ -111,8 +185,11 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
       const dy_to_node = n.y - y1;
       const t = (dx_to_node * (x2 - x1) + dy_to_node * (y2 - y1)) / (dist * dist);
       const tClamped = Math.max(0, Math.min(1, t));
+      
+      // Raza dinamică a nodului
+      const nodeRadius = getNodeRadius(n.label);
 
-      return { node: n, d, side, t: tClamped };
+      return { node: n, d, side, t: tClamped, nodeRadius };
     });
 
   // ===== PASUL 2: Calculez offseturile SEPARATE pentru c1 și c2 =====
@@ -128,13 +205,13 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
   let obstacleCount = 0;
 
   obstacleNodes.forEach(o => {
-    if (o.d < nodeRadius + margin) {
+    if (o.d < o.nodeRadius + margin) {
       // Cât de mult intră în zona de siguranță
-      const penetration = nodeRadius + margin - o.d;
+      const penetration = o.nodeRadius + margin - o.d;
       
       // Strength: 0 la margine, 1 în centru
-      const strength = penetration / (nodeRadius + margin);
-      const magnitude = strength * (nodeRadius + 20) * 2.5;  // Crescut din 1.5 la 2.5
+      const strength = penetration / (o.nodeRadius + margin);
+      const magnitude = strength * (o.nodeRadius + 20) * 2.5;  // Crescut din 1.5 la 2.5
 
       // Verific dacă nodul e DEASUPRA sau DEDESUBTUL liniei pe axa Y
       const t = ((o.node.x - x1) * (x2 - x1) + (o.node.y - y1) * (y2 - y1)) / (dist * dist);
@@ -218,7 +295,7 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
   
   // Pentru fiecare obstacol, creed UN punct de control la mijlocul muchiei
   const obstaclesWithOffset = obstacleNodes
-    .filter(o => o.d < nodeRadius + margin)
+    .filter(o => o.d < o.nodeRadius + margin)
     .sort((a, b) => a.t - b.t); // sortez după poziția pe muchie
   
   obstaclesWithOffset.forEach(obstacle => {
@@ -230,9 +307,9 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = []) {
     };
     
     // Calculez ofsetul perpendicular ca să evitez obstacolul
-    const penetration = (nodeRadius + margin) - obstacle.d;
-    const strength = penetration / (nodeRadius + margin);
-    const offsetDistance = strength * (nodeRadius + 30); // distanta de ocolire
+    const penetration = (obstacle.nodeRadius + margin) - obstacle.d;
+    const strength = penetration / (obstacle.nodeRadius + margin);
+    const offsetDistance = strength * (obstacle.nodeRadius + 30); // distanta de ocolire
     
     // Vectorul DE LA PUNCT PE LINIE SPRE OBSTACOL
     const toObstacleX = obstacle.node.x - ptOnLine.x;
@@ -277,6 +354,10 @@ function GraphEditor() {
   const [isSaving, setIsSaving] = useState(false);
   const [currentDiagramId, setCurrentDiagramId] = useState(null); // ID-ul curent pentru update
   const [isLoading, setIsLoading] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [shouldExitAfterSave, setShouldExitAfterSave] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
   const fileInputRef = React.useRef(null);
   const exportMenuRef = React.useRef(null);
 
@@ -388,12 +469,35 @@ function GraphEditor() {
       if (data.diagramId && !currentDiagramId) {
         setCurrentDiagramId(data.diagramId);
       }
-      alert('Diagrama a fost salvată cu succes!');
+      // Afișează toast-ul de succes
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 5000);
+      
+      // Dacă utilizatorul a apăsat Back și apoi Salvează, navighează la dashboard
+      if (shouldExitAfterSave) {
+        setShouldExitAfterSave(false);
+        setTimeout(() => navigate('/dashboard'), 1500);
+      }
 
     } catch (err) {
       setSaveError('Eroare de rețea sau server!');
       setIsSaving(false);
     }
+  }
+
+  // Funcție pentru resetarea la ultima versiune salvată sau ștergerea totală
+  async function confirmReset() {
+    if (currentDiagramId) {
+      // Reîncarcă din baza de date
+      await loadDiagram(currentDiagramId);
+    } else {
+      // Șterge tot (nu e o diagramă salvată)
+      setNodes([]);
+      setEdges([]);
+      setAssistantNodes('');
+      setAssistantEdges('');
+    }
+    setShowResetModal(false);
   }
 
   // Închide meniul de export când se dă click în alt loc
@@ -617,28 +721,35 @@ function GraphEditor() {
 
     // Desenez nodurile
     nodes.forEach(node => {
+      const nodeRadius = getNodeRadius(node.label);
+      const lines = splitTextIntoLines(node.label, MAX_CHARS_PER_LINE);
+      const lineHeight = 16;
+      const textStartY = node.y - ((lines.length - 1) * lineHeight) / 2 + 5;
+      
       // Cercul nodului
       const circle = document.createElementNS(svgNamespace, 'circle');
       circle.setAttribute('cx', node.x);
       circle.setAttribute('cy', node.y);
-      circle.setAttribute('r', '28');
+      circle.setAttribute('r', nodeRadius);
       circle.setAttribute('fill', '#ede9fe');
       circle.setAttribute('stroke', '#8b5cf6');
       circle.setAttribute('stroke-width', '3');
       svg.appendChild(circle);
 
-      // Eticheta nodului
+      // Eticheta nodului (poate fi pe mai multe linii)
       if (node.label) {
-        const text = document.createElementNS(svgNamespace, 'text');
-        text.setAttribute('x', node.x);
-        text.setAttribute('y', node.y + 6);
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('font-size', '18');
-        text.setAttribute('font-family', 'Arial, sans-serif');
-        text.setAttribute('fill', '#5b21b6');
-        text.setAttribute('font-weight', 'bold');
-        text.textContent = node.label;
-        svg.appendChild(text);
+        lines.forEach((line, idx) => {
+          const text = document.createElementNS(svgNamespace, 'text');
+          text.setAttribute('x', node.x);
+          text.setAttribute('y', textStartY + idx * lineHeight);
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('font-size', '16');
+          text.setAttribute('font-family', 'Arial, sans-serif');
+          text.setAttribute('fill', '#5b21b6');
+          text.setAttribute('font-weight', 'bold');
+          text.textContent = line;
+          svg.appendChild(text);
+        });
       }
     });
 
@@ -917,11 +1028,18 @@ function GraphEditor() {
   }
 
   // Mută nodul cu mouse-ul
-  // Verifică suprapunere cu alt nod
-  function isOverlapping(x, y, excludeId = null) {
-  const radius = 28; // raza nodului (corectă pentru desen)
-  const padding = 12; // spațiu minim între contururi
-  return nodes.some(n => n.id !== excludeId && Math.hypot(n.x - x, n.y - y) < radius * 2 + padding);
+  // Verifică suprapunere cu alt nod (folosind razele dinamice)
+  function isOverlapping(x, y, excludeId = null, newLabel = null) {
+    const padding = 12; // spațiu minim între contururi
+    const draggedNode = nodes.find(n => n.id === excludeId);
+    const draggedRadius = draggedNode ? getNodeRadius(newLabel || draggedNode.label) : BASE_NODE_RADIUS;
+    
+    return nodes.some(n => {
+      if (n.id === excludeId) return false;
+      const otherRadius = getNodeRadius(n.label);
+      const minDist = draggedRadius + otherRadius + padding;
+      return Math.hypot(n.x - x, n.y - y) < minDist;
+    });
   }
 
   function handleMouseMove(e) {
@@ -1182,7 +1300,7 @@ function GraphEditor() {
 
   return (
   <div className="graph-editor-root">
-      <button className="btn-back" onClick={() => navigate('/dashboard')} style={{ position: 'absolute', top: '24px', left: '32px', zIndex: 10 }}>← Back</button>
+      <button className="btn-back" onClick={() => setShowExitModal(true)} style={{ position: 'absolute', top: '24px', left: '32px', zIndex: 10 }}>← Back</button>
       <div className="graph-editor-header">
         <h2 style={{
           fontFamily: 'Caveat, cursive',
@@ -1200,7 +1318,7 @@ function GraphEditor() {
         <button className={`graph-toolbar-btn${addNodeMode ? ' active' : ''}`} onClick={handleAddNode}>Adaugă nod</button>
         <button className={`graph-toolbar-btn${addEdgeMode ? ' active' : ''}`} onClick={handleAddEdge}>Adaugă muchie</button>
         <button className="graph-toolbar-btn">Șterge</button>
-        <button className="graph-toolbar-btn">Reset</button>
+        <button className="graph-toolbar-btn" onClick={() => setShowResetModal(true)}>Reset</button>
         <button className="graph-toolbar-btn" onClick={() => fileInputRef.current?.click()}>Importă JSON</button>
         <input
           ref={fileInputRef}
@@ -1359,65 +1477,74 @@ function GraphEditor() {
               );
             })}
             {/* Noduri */}
-            {nodes.map(node => (
-              <g key={node.id} style={{ cursor: draggingNodeId === node.id ? 'grabbing' : 'pointer' }}>
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={28}
-                  fill="#ede9fe"
-                  stroke="#8b5cf6"
-                  strokeWidth={3}
-                  onClick={() => addEdgeMode ? handleNodeClick(node.id) : undefined}
-                  onDoubleClick={() => !addEdgeMode ? handleNodeClick(node.id) : undefined}
-                  onMouseDown={e => handleNodeMouseDown(node, e)}
-                  onContextMenu={e => handleNodeContextMenu(node, e)}
-                />
-                {showDeleteIcon.nodeId === node.id && (
-                  <foreignObject x={showDeleteIcon.x} y={showDeleteIcon.y} width={32} height={32}>
-                    <button
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-                      onClick={() => handleDeleteNode(node.id)}
-                      title="Șterge nod"
-                    >
-                      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="6" y="8" width="10" height="8" rx="2" fill="#ede9fe" stroke="#8b5cf6" strokeWidth="1.5"/>
-                        <rect x="8" y="6" width="6" height="2" rx="1" fill="#8b5cf6"/>
-                        <line x1="9" y1="10" x2="9" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
-                        <line x1="11" y1="10" x2="11" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
-                        <line x1="13" y1="10" x2="13" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
-                      </svg>
-                    </button>
-                  </foreignObject>
-                )}
-                {editingNodeId === node.id ? (
-                  <foreignObject x={node.x - 24} y={node.y - 16} width={48} height={32}>
-                    <input
-                      type="text"
-                      value={editingValue}
-                      autoFocus
-                      style={{ width: '100%', height: '28px', fontSize: '16px', textAlign: 'center', border: 'none', outline: 'none', color: '#5b21b6', background: 'transparent', boxShadow: 'none', padding: 0 }}
-                      onChange={e => setEditingValue(e.target.value)}
-                      onBlur={handleEditBlurOrEnter}
-                      onKeyDown={e => { if (e.key === 'Enter') handleEditBlurOrEnter(); }}
-                    />
-                  </foreignObject>
-                ) : (
-                  node.label && (
-                    <text
-                      x={node.x}
-                      y={node.y + 6}
-                      textAnchor="middle"
-                      fontSize={18}
-                      fill="#5b21b6"
-                      fontWeight="bold"
-                    >
-                      {node.label}
-                    </text>
-                  )
-                )}
-              </g>
-            ))}
+            {nodes.map(node => {
+              const nodeRadius = getNodeRadius(node.label);
+              const lines = splitTextIntoLines(node.label, MAX_CHARS_PER_LINE);
+              const lineHeight = 16;
+              const textStartY = node.y - ((lines.length - 1) * lineHeight) / 2 + 5;
+              
+              return (
+                <g key={node.id} style={{ cursor: draggingNodeId === node.id ? 'grabbing' : 'pointer' }}>
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={nodeRadius}
+                    fill="#ede9fe"
+                    stroke="#8b5cf6"
+                    strokeWidth={3}
+                    onClick={() => addEdgeMode ? handleNodeClick(node.id) : undefined}
+                    onDoubleClick={() => !addEdgeMode ? handleNodeClick(node.id) : undefined}
+                    onMouseDown={e => handleNodeMouseDown(node, e)}
+                    onContextMenu={e => handleNodeContextMenu(node, e)}
+                  />
+                  {showDeleteIcon.nodeId === node.id && (
+                    <foreignObject x={showDeleteIcon.x} y={showDeleteIcon.y} width={32} height={32}>
+                      <button
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+                        onClick={() => handleDeleteNode(node.id)}
+                        title="Șterge nod"
+                      >
+                        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect x="6" y="8" width="10" height="8" rx="2" fill="#ede9fe" stroke="#8b5cf6" strokeWidth="1.5"/>
+                          <rect x="8" y="6" width="6" height="2" rx="1" fill="#8b5cf6"/>
+                          <line x1="9" y1="10" x2="9" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
+                          <line x1="11" y1="10" x2="11" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
+                          <line x1="13" y1="10" x2="13" y2="14" stroke="#8b5cf6" strokeWidth="1.5"/>
+                        </svg>
+                      </button>
+                    </foreignObject>
+                  )}
+                  {editingNodeId === node.id ? (
+                    <foreignObject x={node.x - nodeRadius} y={node.y - 16} width={nodeRadius * 2} height={32}>
+                      <input
+                        type="text"
+                        value={editingValue}
+                        autoFocus
+                        style={{ width: '100%', height: '28px', fontSize: '16px', textAlign: 'center', border: 'none', outline: 'none', color: '#5b21b6', background: 'transparent', boxShadow: 'none', padding: 0 }}
+                        maxLength={10}
+                        onChange={e => setEditingValue(e.target.value)}
+                        onBlur={handleEditBlurOrEnter}
+                        onKeyDown={e => { if (e.key === 'Enter') handleEditBlurOrEnter(); }}
+                      />
+                    </foreignObject>
+                  ) : (
+                    node.label && lines.map((line, idx) => (
+                      <text
+                        key={idx}
+                        x={node.x}
+                        y={textStartY + idx * lineHeight}
+                        textAnchor="middle"
+                        fontSize={16}
+                        fill="#5b21b6"
+                        fontWeight="bold"
+                      >
+                        {line}
+                      </text>
+                    ))
+                  )}
+                </g>
+              );
+            })}
           </svg>
         </div>
   <div className="graph-assistant-panel" style={{ minWidth: 280, width: 360, background: '#fff', borderRadius: 18, boxShadow: '0 2px 12px rgba(80,80,160,0.10)', padding: '22px 22px 0 22px', marginLeft: 24, marginRight: 32, display: 'flex', flexDirection: 'column', gap: 12, height: '520px', overflowY: 'auto', boxSizing: 'border-box' }}>
@@ -1430,6 +1557,191 @@ function GraphEditor() {
           {assistantError && <div className="graph-assistant-error" style={{ color: '#b91c1c', fontSize: '0.98rem', marginTop: 4, fontWeight: 500 }}>{assistantError}</div>}
         </div>
       </div>
+
+      {/* Modal confirmare ieșire */}
+      {showExitModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: '32px 40px',
+            minWidth: 400,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            textAlign: 'center'
+          }}>
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" style={{ marginBottom: 16 }}>
+              <circle cx="24" cy="24" r="22" stroke="#f59e0b" strokeWidth="3" fill="#fef3c7"/>
+              <path d="M24 14v12" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round"/>
+              <circle cx="24" cy="32" r="2" fill="#f59e0b"/>
+            </svg>
+            <h3 style={{ 
+              margin: '0 0 12px 0', 
+              color: '#5b21b6',
+              fontSize: '1.4rem'
+            }}>Doriți să salvați modificările?</h3>
+            <p style={{ 
+              color: '#6b7280', 
+              marginBottom: 24,
+              fontSize: '1rem'
+            }}>Ai modificări nesalvate. Ce dorești să faci?</p>
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  setShowExitModal(false);
+                  navigate('/dashboard');
+                }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  border: '1px solid #d1c4e9',
+                  background: '#fff',
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }}
+              >
+                Nu salva
+              </button>
+              <button
+                onClick={() => {
+                  setShowExitModal(false);
+                  setShouldExitAfterSave(true);
+                  handleSave();
+                }}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#7c3aed',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }}
+              >
+                Salvează
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmare reset */}
+      {showResetModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: '32px 40px',
+            minWidth: 400,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            textAlign: 'center'
+          }}>
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" style={{ marginBottom: 16 }}>
+              <circle cx="24" cy="24" r="22" stroke="#ef4444" strokeWidth="3" fill="#fef2f2"/>
+              <path d="M16 16l16 16M32 16l-16 16" stroke="#ef4444" strokeWidth="3" strokeLinecap="round"/>
+            </svg>
+            <h3 style={{ 
+              margin: '0 0 12px 0', 
+              color: '#5b21b6',
+              fontSize: '1.4rem'
+            }}>Sigur doriți să ștergeți modificările?</h3>
+            <p style={{ 
+              color: '#6b7280', 
+              marginBottom: 24,
+              fontSize: '1rem'
+            }}>{currentDiagramId 
+              ? 'Se va reveni la ultima versiune salvată.' 
+              : 'Tot conținutul va fi șters definitiv.'}</p>
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                onClick={() => setShowResetModal(false)}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  border: '1px solid #d1c4e9',
+                  background: '#fff',
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }}
+              >
+                Anulează
+              </button>
+              <button
+                onClick={confirmReset}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#ef4444',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }}
+              >
+                Șterge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast notificare salvare cu succes */}
+      {showSuccessToast && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: '#fff',
+          padding: '24px 48px',
+          borderRadius: 16,
+          boxShadow: '0 10px 40px rgba(16, 185, 129, 0.4)',
+          zIndex: 2000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          animation: 'fadeInScale 0.3s ease-out'
+        }}>
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="14" fill="rgba(255,255,255,0.2)"/>
+            <path d="M10 16l4 4 8-8" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: 4 }}>Salvat cu succes!</div>
+            <div style={{ fontSize: '0.95rem', opacity: 0.9 }}>Diagrama ta a fost salvată în baza de date.</div>
+          </div>
+        </div>
+      )}
 
       {/* Modal pentru salvarea diagramei */}
       {showSaveModal && (
