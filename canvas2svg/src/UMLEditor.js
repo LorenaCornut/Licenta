@@ -15,7 +15,14 @@ const CLASS_ELEMENTS = {
 const UML_TYPES = {
   CLASS: 'Class Diagram',
   SEQUENCE: 'Sequence Diagram',
-  USE_CASE: 'Use Case Diagram'
+  USE_CASE: 'Use Case Diagram',
+  COMPONENT: 'Component Diagram',
+  COMPOSITE_STRUCTURE: 'Composite Structure Diagram',
+  DEPLOYMENT: 'Deployment Diagram',
+  OBJECT: 'Object Diagram',
+  PACKAGE: 'Package Diagram',
+  ACTIVITY: 'Activity Diagram',
+  STATE: 'State Diagram'
 };
 
 // Elemente pentru Sequence Diagram (toate simbolurile din poză)
@@ -40,8 +47,55 @@ const USE_CASE_ELEMENTS = {
   ACTOR: { label: 'Actor', icon: '🧑', color: '#e8f4f8', isNode: true },
   USE_CASE: { label: 'Use Case', icon: '●', color: '#fff4e6', isNode: true },
   SYSTEM: { label: 'System', icon: '◻', color: '#f0f0f0', isNode: true },
+  ASSOCIATION: { label: 'Association', icon: '―', color: '#f0f0f0', isConnection: true },
+  GENERALIZATION: { label: 'Generalization', icon: '⇨', color: '#f0f0f0', isConnection: true },
   INCLUDE: { label: 'Include', icon: '⊳', color: '#f0f0f0', isConnection: true },
   EXTEND: { label: 'Extend', icon: '✓', color: '#f0f0f0', isConnection: true }
+};
+
+// Elemente pentru Component Diagram
+const COMPONENT_ELEMENTS = {
+  COMPONENT: { label: 'Component', icon: '⬚', color: '#fff4e6', isNode: true },
+  INTERFACE: { label: 'Interface', icon: '◯', color: '#e0f2fe', isNode: true },
+  DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#f0f0f0', isConnection: true },
+  REALIZATION: { label: 'Realization', icon: '⇨', color: '#f0f0f0', isConnection: true }
+};
+
+// Elemente pentru Deployment Diagram
+const DEPLOYMENT_ELEMENTS = {
+  NODE: { label: 'Node', icon: '⬜', color: '#f0e68c', isNode: true },
+  ARTIFACT: { label: 'Artifact', icon: '📦', color: '#fff4e6', isNode: true },
+  DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#f0f0f0', isConnection: true }
+};
+
+// Elemente pentru Object Diagram
+const OBJECT_ELEMENTS = {
+  OBJECT_INSTANCE: { label: 'Object Instance', icon: '◻', color: '#fffef0', isNode: true },
+  LINK: { label: 'Link', icon: '―', color: '#f0f0f0', isConnection: true }
+};
+
+// Elemente pentru Package Diagram
+const PACKAGE_ELEMENTS = {
+  PACKAGE: { label: 'Package', icon: '📁', color: '#fff4e6', isNode: true },
+  DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#f0f0f0', isConnection: true }
+};
+
+// Elemente pentru Activity Diagram
+const ACTIVITY_ELEMENTS = {
+  ACTION: { label: 'Action', icon: '▭', color: '#bae6fd', isNode: true },
+  DECISION: { label: 'Decision', icon: '◇', color: '#fde047', isNode: true },
+  FORK_JOIN: { label: 'Fork/Join', icon: '―', color: '#000', isNode: true },
+  INITIAL: { label: 'Initial', icon: '●', color: '#000', isNode: true },
+  FINAL: { label: 'Final', icon: '◉', color: '#000', isNode: true },
+  TRANSITION: { label: 'Transition', icon: '→', color: '#f0f0f0', isConnection: true }
+};
+
+// Elemente pentru State Diagram
+const STATE_ELEMENTS = {
+  STATE: { label: 'State', icon: '▭', color: '#fff4e6', isNode: true },
+  INITIAL: { label: 'Initial', icon: '●', color: '#000', isNode: true },
+  FINAL: { label: 'Final', icon: '◉', color: '#000', isNode: true },
+  TRANSITION: { label: 'Transition', icon: '→', color: '#f0f0f0', isConnection: true }
 };
 
 const UMLEditor = () => {
@@ -80,6 +134,20 @@ const UMLEditor = () => {
         return SEQUENCE_ELEMENTS;
       case 'USE_CASE':
         return USE_CASE_ELEMENTS;
+      case 'COMPONENT':
+        return COMPONENT_ELEMENTS;
+      case 'DEPLOYMENT':
+        return DEPLOYMENT_ELEMENTS;
+      case 'OBJECT':
+        return OBJECT_ELEMENTS;
+      case 'PACKAGE':
+        return PACKAGE_ELEMENTS;
+      case 'ACTIVITY':
+        return ACTIVITY_ELEMENTS;
+      case 'STATE':
+        return STATE_ELEMENTS;
+      case 'COMPOSITE_STRUCTURE':
+        return COMPONENT_ELEMENTS; // refolositm componentele
       default:
         return CLASS_ELEMENTS;
     }
@@ -379,7 +447,7 @@ const UMLEditor = () => {
 
   // Handler pentru export JSON
   const handleSaveJSON = () => {
-    const data = JSON.stringify({ elements, connections }, null, 2);
+    const data = JSON.stringify({ selectedType, elements, connections }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -406,6 +474,17 @@ const UMLEditor = () => {
     a.download = 'uml-diagram.svg';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Escapează caractere speciale pentru XML/SVG
+  const escapeXML = (str) => {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
   };
 
   // Export SVG complet (clase + conexiuni)
@@ -439,13 +518,25 @@ const UMLEditor = () => {
       </marker>
     </defs>\n`;
 
-    // Funcție identică cu getConnectionPoints din editor
+    // Funcție pentru calculare puncte conexiuni (suportă toate tipurile de elemente)
     function getConnectionPointsSVG(conn) {
       const fromEl = elements.find(el => el.id === conn.from);
       const toEl = elements.find(el => el.id === conn.to);
       if (!fromEl || !toEl) return null;
-      const fromHeight = fromEl.height || 120;
-      const toHeight = toEl.height || 120;
+      
+      // Calculează înălțime reală pe baza tipului
+      const getElementHeightForCalc = (el) => {
+        if (el.type === 'CLASS' || el.type === 'INTERFACE') {
+          const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
+          const attrHeight = Math.max(30, (el.attributes?.length || 0) * 20 + 12);
+          const methodHeight = Math.max(30, (el.methods?.length || 0) * 20 + 12);
+          return headerHeight + attrHeight + methodHeight;
+        }
+        return el.height || 120;
+      };
+      
+      const fromHeight = getElementHeightForCalc(fromEl);
+      const toHeight = getElementHeightForCalc(toEl);
       const fromX = fromEl.x + (fromEl.width || 150) / 2;
       const fromY = fromEl.y + fromHeight / 2;
       const toX = toEl.x + (toEl.width || 150) / 2;
@@ -453,10 +544,13 @@ const UMLEditor = () => {
       const angle = Math.atan2(toY - fromY, toX - fromX);
       const startX = fromX + Math.cos(angle) * ((fromEl.width || 150) / 2);
       const startY = fromY + Math.sin(angle) * (fromHeight / 2);
+      
       let markerOffset = 0;
       if (conn.type === 'INHERITANCE' || conn.type === 'COMPOSITION') markerOffset = 16;
       if (conn.type === 'ASSOCIATION') markerOffset = 12;
       if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') markerOffset = 12;
+      if (conn.type === 'LINE_ARROW' || conn.type === 'DOTTED_ARROW') markerOffset = 10;
+      
       const endX = toX - Math.cos(angle) * ((toEl.width || 150) / 2 + markerOffset);
       const endY = toY - Math.sin(angle) * (toHeight / 2 + markerOffset);
       return { startX, startY, endX, endY };
@@ -466,43 +560,172 @@ const UMLEditor = () => {
     connections.forEach(conn => {
       const points = getConnectionPointsSVG(conn);
       if (!points) return;
+      
       let marker = '';
-      if (conn.type === 'INHERITANCE') marker = 'url(#arrowTriangle)';
-      else if (conn.type === 'COMPOSITION') marker = 'url(#arrowDiamond)';
-      else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
-      else if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') marker = 'url(#arrowOpen)';
-      else marker = 'url(#arrowSimple)';
-      svg += `<line x1='${points.startX}' y1='${points.startY}' x2='${points.endX}' y2='${points.endY}' stroke='#8b4513' stroke-width='2' marker-end='${marker}' />\n`;
+      let strokeDasharray = 'none';
+      let stroke = '#8b4513';
+      let strokeWidth = '2';
+      
+      // Class Diagram connections
+      if (conn.type === 'INHERITANCE') {
+        marker = 'url(#arrowTriangle)';
+      } else if (conn.type === 'COMPOSITION') {
+        marker = 'url(#arrowDiamond)';
+      } else if (conn.type === 'AGGREGATION') {
+        marker = 'url(#arrowDiamondOpen)';
+      } else if (conn.type === 'ASSOCIATION') {
+        // CLASS ASSOCIATION - marker triunghi mic
+        if (selectedType === 'CLASS') {
+          marker = 'url(#arrowSimple)';
+        }
+        // USE_CASE ASSOCIATION - linie simplă fără marker
+      } else if (conn.type === 'GENERALIZATION') {
+        // USE_CASE GENERALIZATION - triunghi ca inheritance
+        marker = 'url(#arrowTriangle)';
+      } else if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') {
+        marker = 'url(#arrowOpen)';
+        strokeDasharray = '6,6';
+      }
+      // Sequence Diagram connections
+      else if (conn.type === 'LINE_ARROW') {
+        marker = 'url(#arrowSimple)';
+        stroke = '#8b4513';
+      } else if (conn.type === 'LINE') {
+        stroke = '#8b4513';
+      } else if (conn.type === 'DOTTED_ARROW') {
+        strokeDasharray = '6,6';
+        marker = 'url(#arrowOpen)';
+        stroke = '#8b4513';
+      } else if (conn.type === 'DOTTED') {
+        strokeDasharray = '6,6';
+        stroke = '#8b4513';
+      }
+      
+      let lineAttrs = `x1='${points.startX}' y1='${points.startY}' x2='${points.endX}' y2='${points.endY}' stroke='${stroke}' stroke-width='${strokeWidth}'`;
+      if (strokeDasharray !== 'none') {
+        lineAttrs += ` stroke-dasharray='${strokeDasharray}'`;
+      }
+      if (marker) {
+        lineAttrs += ` marker-end='${marker}'`;
+      }
+      svg += `<line ${lineAttrs} />\n`;
+      
+      // Adauga label pentru INCLUDE și EXTEND
+      if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') {
+        const midX = (points.startX + points.endX) / 2;
+        const midY = (points.startY + points.endY) / 2;
+        const labelText = conn.type === 'INCLUDE' ? '&lt;&lt;include&gt;&gt;' : '&lt;&lt;extend&gt;&gt;';
+        svg += `<text x='${midX}' y='${midY - 8}' font-size='12' font-family='monospace' text-anchor='middle' fill='#8b4513' font-weight='500'>${labelText}</text>\n`;
+      }
     });
 
-    // Clase UML
+    // Elemente UML (Class, Sequence, Use Case)
     elements.forEach(el => {
-      if (el.type !== 'CLASS' && el.type !== 'INTERFACE') return;
       const w = el.width || 150;
       const h = el.height || 120;
       const x = el.x;
       const y = el.y;
-      // Box
-      svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='6' fill='#fffef0' stroke='#8b4513' stroke-width='2'/>\n`;
-      // Header
-      svg += `<rect x='${x}' y='${y}' width='${w}' height='32' fill='#fff7e6' stroke='#8b4513' stroke-width='1'/>\n`;
-      svg += `<text x='${x + w / 2}' y='${y + 22}' font-size='18' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${el.name}</text>\n`;
-      // Linie sub header
-      svg += `<line x1='${x}' y1='${y + 32}' x2='${x + w}' y2='${y + 32}' stroke='#8b4513' stroke-width='1'/>\n`;
-      // Atribute
-      if (el.attributes && el.attributes.length) {
-        el.attributes.forEach((attr, i) => {
-          svg += `<text x='${x + 8}' y='${y + 52 + i * 18}' font-size='15' font-family='monospace' fill='#222'>${attr}</text>\n`;
-        });
-      }
-      // Linie sub atribute
-      const attrSectionHeight = 32 + (el.attributes ? el.attributes.length * 18 : 0);
-      svg += `<line x1='${x}' y1='${y + attrSectionHeight}' x2='${x + w}' y2='${y + attrSectionHeight}' stroke='#8b4513' stroke-width='1'/>\n`;
-      // Metode
-      if (el.methods && el.methods.length) {
-        el.methods.forEach((m, i) => {
-          svg += `<text x='${x + 8}' y='${y + attrSectionHeight + 20 + i * 18}' font-size='15' font-family='monospace' fill='#222'>${m}</text>\n`;
-        });
+      
+      if (el.type === 'CLASS' || el.type === 'INTERFACE') {
+        // Clase UML
+        // Box
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='6' fill='#fffef0' stroke='#8b4513' stroke-width='2'/>\n`;
+        // Header
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='32' fill='#fff7e6' stroke='#8b4513' stroke-width='1'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + 22}' font-size='18' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        // Linie sub header
+        svg += `<line x1='${x}' y1='${y + 32}' x2='${x + w}' y2='${y + 32}' stroke='#8b4513' stroke-width='1'/>\n`;
+        // Atribute
+        if (el.attributes && el.attributes.length) {
+          el.attributes.forEach((attr, i) => {
+            svg += `<text x='${x + 8}' y='${y + 52 + i * 18}' font-size='15' font-family='monospace' fill='#222'>${escapeXML(attr)}</text>\n`;
+          });
+        }
+        // Linie sub atribute
+        const attrSectionHeight = 32 + (el.attributes ? el.attributes.length * 18 : 0);
+        svg += `<line x1='${x}' y1='${y + attrSectionHeight}' x2='${x + w}' y2='${y + attrSectionHeight}' stroke='#8b4513' stroke-width='1'/>\n`;
+        // Metode
+        if (el.methods && el.methods.length) {
+          el.methods.forEach((m, i) => {
+            svg += `<text x='${x + 8}' y='${y + attrSectionHeight + 20 + i * 18}' font-size='15' font-family='monospace' fill='#222'>${escapeXML(m)}</text>\n`;
+          });
+        }
+      } else if (el.type === 'ACTOR') {
+        // Actor SVG - exact ca în editor
+        const centerX = x + w / 2;
+        const headR = 7;
+        const headY = y + 10;
+        // Centrul pentru scalare
+        svg += `<g transform='translate(${centerX}, ${headY})'>\n`;
+        svg += `<circle cx='0' cy='0' r='${headR}' fill='#f9d6d6' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='0' y1='${headR}' x2='0' y2='${28}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='-14' y1='${15}' x2='14' y2='${15}' stroke='#222' stroke-width='1.2'/>\n`;
+        svg += `<line x1='0' y1='${28}' x2='-12' y2='${47}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='0' y1='${28}' x2='12' y2='${47}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `</g>\n`;
+        svg += `<text x='${centerX}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'OBJECT') {
+        // Object - dreptunghi alb cu border și text centrat
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='#ffffff' stroke='#222' stroke-width='1.5' rx='2'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 4}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'ACTIVATION') {
+        // Activation - linie verticală subțire (6px larg, 80% înălțime)
+        const barWidth = 6;
+        const barHeight = h * 0.8;
+        const barX = x + w / 2 - barWidth / 2;
+        const barY = y + (h - barHeight) / 2;
+        svg += `<rect x='${barX}' y='${barY}' width='${barWidth}' height='${barHeight}' fill='#e5e7eb' stroke='#999' stroke-width='0.5' rx='1.5'/>\n`;
+      } else if (el.type === 'DESTROY') {
+        // Destroy - ✕ mare cu culoare violetă
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const sz = 18;
+        svg += `<text x='${cx}' y='${cy + 8}' font-size='40' font-family='Arial' text-anchor='middle' fill='#7c3aed' font-weight='bold'>✕</text>\n`;
+        svg += `<text x='${cx}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'BOUNDARY') {
+        // Boundary - cerc cu text sub
+        const r = Math.min(w / 2, h / 2);
+        svg += `<circle cx='${x + w / 2}' cy='${y + h / 2}' r='${r - 1}' fill='none' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'CONTROL') {
+        // Control - emoji ↻ centrat
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 12}' font-size='30' font-family='Arial' text-anchor='middle' fill='#222'>↻</text>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'ALT') {
+        // ALT - dreptunghi cu border mov și text "alt" în colțul stânga sus
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='none' stroke='#a78bfa' stroke-width='2' rx='2'/>\n`;
+        svg += `<text x='${x + 6}' y='${y + 13}' font-size='11' font-family='monospace' fill='#7c3aed' font-weight='500'>alt</text>\n`;
+        // Linie separatoare după header
+        svg += `<line x1='${x}' y1='${y + 18}' x2='${x + w}' y2='${y + 18}' stroke='#a78bfa' stroke-width='1'/>\n`;
+        // Text în mijloc
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'LOOP') {
+        // LOOP - dreptunghi cu titlu "loop" și text în mijloc
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='none' stroke='#8b7d3f' stroke-width='1.5' rx='2'/>\n`;
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='24' fill='#fff4e6' stroke='#8b7d3f' stroke-width='1.5'/>\n`;
+        svg += `<text x='${x + 6}' y='${y + 16}' font-size='11' font-family='monospace' fill='#8b7d3f' font-weight='500'>loop</text>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'USE_CASE') {
+        // Use Case - elipsă
+        svg += `<ellipse cx='${x + w / 2}' cy='${y + h / 2}' rx='${w / 2 - 1}' ry='${h / 2 - 1}' fill='#fff4e6' stroke='#8b4513' stroke-width='1.5'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'ACTOR' && selectedType === 'USE_CASE') {
+        // ACTOR pentru USE_CASE - stick figure
+        const centerX = x + w / 2;
+        const centerY = y + h / 2;
+        const headRadius = 4;
+        const bodyHeight = h * 0.4;
+        
+        svg += `<circle cx='${centerX}' cy='${centerY - bodyHeight / 2 - 6}' r='${headRadius}' fill='none' stroke='#222' stroke-width='1'/>\n`;
+        svg += `<line x1='${centerX}' y1='${centerY - bodyHeight / 2}' x2='${centerX}' y2='${centerY + bodyHeight / 2 - 10}' stroke='#222' stroke-width='1'/>\n`;
+        svg += `<line x1='${centerX - 6}' y1='${centerY - bodyHeight / 2 + 4}' x2='${centerX + 6}' y2='${centerY - bodyHeight / 2 + 4}' stroke='#222' stroke-width='1'/>\n`;
+        svg += `<line x1='${centerX}' y1='${centerY + bodyHeight / 2 - 10}' x2='${centerX - 4}' y2='${centerY + bodyHeight / 2}' stroke='#222' stroke-width='1'/>\n`;
+        svg += `<line x1='${centerX}' y1='${centerY + bodyHeight / 2 - 10}' x2='${centerX + 4}' y2='${centerY + bodyHeight / 2}' stroke='#222' stroke-width='1'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'SYSTEM') {
+        // System - dreptunghi gros
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='#f0f0f0' stroke='#8b4513' stroke-width='2' rx='3'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
       }
     });
 
@@ -723,6 +946,45 @@ const UMLEditor = () => {
 
   const elementsList = getElementsList();
 
+  // Detectează tipul diagramei pe baza elementelor
+  const detectDiagramType = (elements) => {
+    if (!elements || elements.length === 0) return 'CLASS';
+    
+    const types = new Set(elements.map(el => el.type));
+    
+    // Check pentru Sequence Diagram
+    const sequenceTypes = ['ACTOR', 'OBJECT', 'ACTIVATION', 'DESTROY', 'BOUNDARY', 'CONTROL', 'ALT', 'LOOP'];
+    if ([...types].some(t => sequenceTypes.includes(t))) return 'SEQUENCE';
+    
+    // Check pentru Use Case Diagram
+    const useCaseTypes = ['USE_CASE', 'SYSTEM'];
+    if ([...types].some(t => useCaseTypes.includes(t))) return 'USE_CASE';
+    
+    // Check pentru Component Diagram
+    const componentTypes = ['COMPONENT', 'INTERFACE'];
+    if ([...types].some(t => componentTypes.includes(t))) return 'COMPONENT';
+    
+    // Check pentru Deployment Diagram
+    if ([...types].has('NODE') || [...types].has('ARTIFACT')) return 'DEPLOYMENT';
+    
+    // Check pentru Object Diagram
+    if ([...types].has('OBJECT_INSTANCE')) return 'OBJECT';
+    
+    // Check pentru Package Diagram
+    const packageTypes = ['PACKAGE'];
+    if ([...types].some(t => packageTypes.includes(t))) return 'PACKAGE';
+    
+    // Check pentru Activity/State Diagram
+    const activityTypes = ['ACTION', 'DECISION', 'FORK_JOIN'];
+    if ([...types].some(t => activityTypes.includes(t))) return 'ACTIVITY';
+    
+    const stateTypes = ['STATE'];
+    if ([...types].some(t => stateTypes.includes(t))) return 'STATE';
+    
+    // Default: Class Diagram
+    return 'CLASS';
+  };
+
   // Handler import JSON
   const handleImport = (event) => {
     const file = event.target.files[0];
@@ -731,6 +993,9 @@ const UMLEditor = () => {
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
+        // Dacă nu are selectedType (fișiere vechi), detectează automat pe baza elementelor
+        const detectedType = data.selectedType || detectDiagramType(data.elements);
+        setSelectedType(detectedType);
         if (data.elements && Array.isArray(data.elements)) setElements(data.elements);
         if (data.connections && Array.isArray(data.connections)) setConnections(data.connections);
       } catch (err) {
@@ -891,6 +1156,60 @@ const UMLEditor = () => {
                         }
                       }}
                     />
+                  </g>
+                );
+              }
+
+              // USE_CASE connections
+              if (
+                selectedType === 'USE_CASE' &&
+                (conn.type === 'ASSOCIATION' || conn.type === 'GENERALIZATION' || conn.type === 'INCLUDE' || conn.type === 'EXTEND')
+              ) {
+                let marker = '';
+                let strokeDasharray = 'none';
+                if (conn.type === 'ASSOCIATION') {
+                  marker = '';
+                } else if (conn.type === 'GENERALIZATION') {
+                  marker = 'url(#arrowTriangle)';
+                } else if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') {
+                  strokeDasharray = '6,6';
+                  marker = 'url(#arrowOpen)';
+                }
+                const midX = (points.startX + points.endX) / 2;
+                const midY = (points.startY + points.endY) / 2;
+                return (
+                  <g key={conn.id} className="connection-group">
+                    <line
+                      x1={points.startX}
+                      y1={points.startY}
+                      x2={points.endX}
+                      y2={points.endY}
+                      stroke="#8b4513"
+                      strokeWidth="2"
+                      strokeDasharray={strokeDasharray}
+                      markerEnd={marker}
+                      className="connection-line"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Șterge conexiunea ${conn.label}?`)) {
+                          handleDeleteConnection(conn.id);
+                        }
+                      }}
+                    />
+                    {(conn.type === 'INCLUDE' || conn.type === 'EXTEND') && (
+                      <text
+                        x={midX}
+                        y={midY - 12}
+                        fontSize="12"
+                        fontFamily="monospace"
+                        textAnchor="middle"
+                        fill="#8b4513"
+                        fontWeight="500"
+                        pointerEvents="none"
+                      >
+                        {conn.type === 'INCLUDE' ? '<<include>>' : '<<extend>>'}
+                      </text>
+                    )}
                   </g>
                 );
               }
@@ -1084,6 +1403,80 @@ const UMLEditor = () => {
                     ) : (
                       <div style={{ fontSize: 15, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
                     )}
+                  </div>
+                ) : el.type === 'ALT' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '2px solid #a78bfa', borderRadius: '2px', background: 'transparent', padding: 0 }}>
+                    <div style={{ paddingTop: '2px', paddingLeft: '6px', borderBottom: '1px solid #a78bfa', minHeight: '16px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#7c3aed', fontWeight: 500 }}>alt</span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '8px' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            width: '90%',
+                            fontSize: 14,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 400,
+                            border: 'none',
+                            background: 'transparent',
+                            boxShadow: 'none',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 14, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : el.type === 'LOOP' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '1.5px solid #8b7d3f', borderRadius: '2px', background: 'transparent', padding: 0, position: 'relative' }}>
+                    <div style={{ padding: '2px 6px', background: '#fff4e6', borderBottom: '1.5px solid #8b7d3f', minHeight: '24px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#8b7d3f', fontWeight: 500 }}>loop</span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '8px' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            width: '90%',
+                            fontSize: 14,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 400,
+                            border: 'none',
+                            background: 'transparent',
+                            boxShadow: 'none',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 14, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                      )}
+                    </div>
                   </div>
                 ) : isClassType ? (
                   <div className="uml-class-box">
