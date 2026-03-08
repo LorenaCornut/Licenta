@@ -1,30 +1,36 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './UMLEditor.css';
 import { useNavigate } from 'react-router-dom';
+// Elemente pentru Class Diagram
+const CLASS_ELEMENTS = {
+  CLASS: { label: 'Class', icon: 'C', color: '#fffef0', isNode: true },
+  INTERFACE: { label: 'Interface', icon: 'I', color: '#f0f9ff', isNode: true },
+  INHERITANCE: { label: 'Inheritance', icon: '⇨', color: '#f3e8ff', isConnection: true },
+  COMPOSITION: { label: 'Composition', icon: '◆', color: '#f3e8ff', isConnection: true },
+  AGGREGATION: { label: 'Aggregation', icon: '◇', color: '#f3e8ff', isConnection: true },
+  ASSOCIATION: { label: 'Association', icon: '→', color: '#f3e8ff', isConnection: true }
+};
 
 // Tipuri de diagrame UML
 const UML_TYPES = {
   CLASS: 'Class Diagram',
   SEQUENCE: 'Sequence Diagram',
-  USE_CASE: 'Use Case Diagram',
-  STATE: 'State Machine',
-  ACTIVITY: 'Activity Diagram'
+  USE_CASE: 'Use Case Diagram'
 };
 
-// Elemente pentru Class Diagram
-const CLASS_ELEMENTS = {
-  CLASS: { label: 'Class', icon: '□', color: '#e8f4f8', isNode: true },
-  INTERFACE: { label: 'Interface', icon: '◇', color: '#fff4e6', isNode: true },
-  INHERITANCE: { label: 'Inheritance', icon: '→', color: '#f0f0f0', isConnection: true },
-  COMPOSITION: { label: 'Composition', icon: '◆', color: '#f0f0f0', isConnection: true },
-  ASSOCIATION: { label: 'Association', icon: '—', color: '#f0f0f0', isConnection: true }
-};
-
-// Elemente pentru Sequence Diagram
+// Elemente pentru Sequence Diagram (toate simbolurile din poză)
 const SEQUENCE_ELEMENTS = {
-  ACTOR: { label: 'Actor', icon: '🧑', color: '#e8f4f8', isNode: true },
-  OBJECT: { label: 'Object', icon: '█', color: '#e8f4f8', isNode: true },
-  MESSAGE: { label: 'Message', icon: '→', color: '#f0f0f0', isConnection: true },
+  ACTOR: { label: 'Actor', icon: '🧑', color: '#fffde7', isNode: true },
+  OBJECT: { label: 'Object', icon: '■', color: '#f9a8d4', isNode: true },
+  ACTIVATION: { label: 'Activation', icon: '▮', color: '#bae6fd', isNode: true },
+  // Linii de mesaj custom explicite
+  LINE_ARROW: { label: 'Linie cu săgeată', icon: '→', color: '#bbf7d0', isConnection: true },
+  LINE: { label: 'Linie simplă', icon: '―', color: '#bbf7d0', isConnection: true },
+  DOTTED_ARROW: { label: 'Punctată cu săgeată', icon: '⇢', color: '#bbf7d0', isConnection: true },
+  DOTTED: { label: 'Punctată simplă', icon: '╌', color: '#bbf7d0', isConnection: true },
+  DESTROY: { label: 'Destroy', icon: '✕', color: '#4ade80', isNode: true },
+  BOUNDARY: { label: 'Boundary', icon: '◯', color: '#f9a8d4', isNode: true },
+  CONTROL: { label: 'Control', icon: '↻', color: '#fef08a', isNode: true },
   LOOP: { label: 'Loop', icon: '⟲', color: '#fff4e6', isNode: true },
   ALT: { label: 'Alt', icon: '⟂', color: '#fff4e6', isNode: true }
 };
@@ -113,9 +119,15 @@ const UMLEditor = () => {
 
     // Structură diferită pentru clase vs alte elemente
     const isClassType = draggedElement === 'CLASS' || draggedElement === 'INTERFACE';
-    
-    const newWidth = isClassType ? 150 : 120;
-    const newHeight = isClassType ? 120 : 80;
+    let newWidth = 150;
+    let newHeight = 120;
+    if (draggedElement === 'INTERFACE') {
+      newWidth = 120;
+      newHeight = 90;
+    } else if (!isClassType) {
+      newWidth = 120;
+      newHeight = 80;
+    }
     
     // Verifică coliziunea și găsește o poziție liberă
     x = Math.max(0, x);
@@ -138,7 +150,7 @@ const UMLEditor = () => {
       width: newWidth,
       height: newHeight,
       // Pentru clase UML
-      attributes: isClassType ? [] : undefined,
+      attributes: draggedElement === 'CLASS' ? [] : undefined,
       methods: isClassType ? [] : undefined
     };
 
@@ -280,7 +292,9 @@ const UMLEditor = () => {
       let newX = startElX;
       let newY = startElY;
       
-      const minWidth = 100;
+      // Permite activatorului să fie mult mai subțire
+      const currentEl = elements.find(el => el.id === elementId);
+      const minWidth = (currentEl && currentEl.type === 'ACTIVATION') ? 2 : 100;
       const minHeight = 60;
       
       // Calculează noile dimensiuni în funcție de direcție
@@ -505,22 +519,17 @@ const UMLEditor = () => {
   // Adaugă atribut nou la dublu-click pe secțiunea de atribute
   const handleAddAttribute = (e, elementId) => {
     e.stopPropagation();
-    
+    const el = elements.find(elem => elem.id === elementId);
+    if (!el || el.type !== 'CLASS') return;
     // Salvează editarea curentă dacă există
     if (editingMember) {
       handleSaveMember(false);
     }
-    
-    const el = elements.find(elem => elem.id === elementId);
-    if (!el) return;
-    
     const newAttrs = [...(el.attributes || []), '-newAttr: Type'];
     const newIndex = newAttrs.length - 1;
-    
     setElements(elements.map(elem => 
       elem.id === elementId ? { ...elem, attributes: newAttrs } : elem
     ));
-    
     // Activează editarea pentru noul atribut
     setEditingMember({ elementId, type: 'attribute', index: newIndex });
     setEditMemberValue('-newAttr: Type');
@@ -578,6 +587,7 @@ const UMLEditor = () => {
     const defaultMethod = '+method(): void';
     
     if (type === 'attribute') {
+      if (currentEl.type !== 'CLASS') return; // Nu permite editarea atributelor pentru INTERFACE
       const newAttrs = [...(currentEl.attributes || [])];
       if (editMemberValue.trim()) {
         newAttrs[index] = editMemberValue;
@@ -591,7 +601,6 @@ const UMLEditor = () => {
       setElements(elements.map(el => 
         el.id === elementId ? { ...el, attributes: newAttrs } : el
       ));
-      
       if (addNext && editMemberValue.trim()) {
         setEditingMember({ elementId, type: 'attribute', index: nextIndex });
         setEditMemberValue(defaultAttr);
@@ -801,7 +810,7 @@ const UMLEditor = () => {
                 draggable={!value.isConnection}
                 onDragStart={(e) => handleDragStart(e, key)}
                 onClick={() => value.isConnection && handleDragStart({ preventDefault: () => {} }, key)}
-                style={{ backgroundColor: value.color }}
+                style={{ backgroundColor: '#ede9fe', color: '#5b21b6', border: '1px solid #ddd6fe' }}
               >
                 <span className="element-icon">{value.icon}</span>
                 <span className="element-label">{value.label}</span>
@@ -839,6 +848,10 @@ const UMLEditor = () => {
               <marker id="arrowSimple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
                 <path d="M0,0 L12,6 L0,12" fill="none" stroke="#8b4513" strokeWidth="2"/>
               </marker>
+              {/* Arrow pentru aggregation (romb gol) */}
+              <marker id="arrowDiamondOpen" markerWidth="16" markerHeight="16" refX="16" refY="8" orient="auto">
+                <path d="M0,8 L8,0 L16,8 L8,16 z" fill="white" stroke="#8b4513" strokeWidth="2"/>
+              </marker>
               {/* Arrow deschis pentru include/extend */}
               <marker id="arrowOpen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
                 <path d="M0,0 L12,6 L0,12" fill="none" stroke="#8b4513" strokeWidth="2"/>
@@ -848,9 +861,56 @@ const UMLEditor = () => {
             {connections.map((conn) => {
               const points = getConnectionPoints(conn);
               if (!points) return null;
-              
-              const isDashed = conn.type === 'INCLUDE' || conn.type === 'EXTEND';
-              
+
+              // Restaurare stil original pentru Class Diagram
+              if (
+                (selectedType === 'CLASS' || selectedType === 'INTERFACE') &&
+                (conn.type === 'ASSOCIATION' || conn.type === 'INHERITANCE' || conn.type === 'COMPOSITION' || conn.type === 'AGGREGATION')
+              ) {
+                let marker = '';
+                if (conn.type === 'INHERITANCE') marker = 'url(#arrowTriangle)';
+                else if (conn.type === 'COMPOSITION') marker = 'url(#arrowDiamond)';
+                else if (conn.type === 'AGGREGATION') marker = 'url(#arrowDiamondOpen)';
+                else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
+                return (
+                  <g key={conn.id} className="connection-group">
+                    <line
+                      x1={points.startX}
+                      y1={points.startY}
+                      x2={points.endX}
+                      y2={points.endY}
+                      stroke="#8b4513"
+                      strokeWidth="2"
+                      strokeDasharray="none"
+                      markerEnd={marker}
+                      className="connection-line"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Șterge conexiunea ${conn.label}?`)) {
+                          handleDeleteConnection(conn.id);
+                        }
+                      }}
+                    />
+                  </g>
+                );
+              }
+
+              // Stiluri pentru Sequence Diagram și alte tipuri custom
+              let stroke = '#8b4513';
+              let strokeDasharray = 'none';
+              let marker = '';
+              if (conn.type === 'LINE_ARROW') {
+                marker = getArrowMarker('MESSAGE');
+              } else if (conn.type === 'LINE') {
+                marker = '';
+              } else if (conn.type === 'DOTTED_ARROW') {
+                strokeDasharray = '6,6';
+                marker = getArrowMarker('INCLUDE'); // open arrow
+              } else if (conn.type === 'DOTTED') {
+                strokeDasharray = '6,6';
+                marker = '';
+              }
+
               return (
                 <g key={conn.id} className="connection-group">
                   <line
@@ -858,10 +918,10 @@ const UMLEditor = () => {
                     y1={points.startY}
                     x2={points.endX}
                     y2={points.endY}
-                    stroke="#8b4513"
+                    stroke={stroke}
                     strokeWidth="2"
-                    strokeDasharray={isDashed ? "5,5" : "none"}
-                    markerEnd={getArrowMarker(conn.type)}
+                    strokeDasharray={strokeDasharray}
+                    markerEnd={marker}
                     className="connection-line"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -870,18 +930,6 @@ const UMLEditor = () => {
                       }
                     }}
                   />
-                  {/* Label pe conexiune */}
-                  <text
-                    x={points.midX}
-                    y={points.midY - 8}
-                    textAnchor="middle"
-                    className="connection-label"
-                    fill="#8b4513"
-                    fontSize="11"
-                  >
-                    {conn.type === 'INCLUDE' ? '«include»' : 
-                     conn.type === 'EXTEND' ? '«extend»' : ''}
-                  </text>
                 </g>
               );
             })}
@@ -889,8 +937,13 @@ const UMLEditor = () => {
 
           {/* Rendered Elements */}
           {elements.map((el) => {
+            const isActor = (el.type === 'ACTOR') && (selectedType === 'SEQUENCE' || selectedType === 'USE_CASE');
+            const isControl = (el.type === 'CONTROL' && selectedType === 'SEQUENCE');
+            const isAlt = (el.type === 'ALT' && selectedType === 'SEQUENCE');
+            const isBoundary = (el.type === 'BOUNDARY' && selectedType === 'SEQUENCE');
+            const isDestroy = (el.type === 'DESTROY' && selectedType === 'SEQUENCE');
             const isClassType = el.type === 'CLASS' || el.type === 'INTERFACE';
-            
+
             return (
               <div
                 key={el.id}
@@ -900,14 +953,139 @@ const UMLEditor = () => {
                   top: `${el.y}px`,
                   width: `${el.width}px`,
                   minHeight: `${el.height}px`,
-                  backgroundColor: isClassType ? '#fffef0' : (elementsList[el.type]?.color || '#f0f0f0')
+                  backgroundColor: isActor || isControl || isAlt || isBoundary || isDestroy ? 'transparent' : (isClassType ? '#fffef0' : '#ede9fe'),
+                  color: '#5b21b6',
+                  border: isAlt ? '2px solid #a78bfa' : (isClassType ? '2px solid #a78bfa' : 'none'),
+                  boxShadow: isActor || isControl || isAlt || isBoundary || isDestroy ? 'none' : undefined,
+                  padding: isActor || isControl || isAlt || isBoundary || isDestroy ? 0 : undefined
                 }}
                 onClick={(e) => handleElementClick(e, el)}
                 onDoubleClick={(e) => handleElementDoubleClick(e, el)}
                 onMouseDown={(e) => handleElementMouseDown(e, el)}
               >
-                {isClassType ? (
-                  // Renderare clasă UML cu 3 secțiuni
+                {(isActor || isControl || isBoundary || isAlt) ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
+                    {/* Icon actor, control sau boundary */}
+                    {isActor ? (
+                      <svg width="38" height="60" viewBox="0 0 38 60" style={{ marginTop: 6 }}>
+                        <circle cx="19" cy="10" r="7" fill="#f9d6d6" stroke="#222" strokeWidth="1.5" />
+                        <line x1="19" y1="17" x2="19" y2="38" stroke="#222" strokeWidth="1.5" />
+                        <line x1="5" y1="25" x2="33" y2="25" stroke="#222" strokeWidth="1.2" />
+                        <line x1="19" y1="38" x2="7" y2="57" stroke="#222" strokeWidth="1.5" />
+                        <line x1="19" y1="38" x2="31" y2="57" stroke="#222" strokeWidth="1.5" />
+                      </svg>
+                    ) : isControl ? (
+                      <div style={{ fontSize: 32, marginTop: 6 }}>↻</div>
+                    ) : isBoundary ? (
+                      <div style={{ fontSize: 32, marginTop: 6 }}>◯</div>
+                    ) : null}
+                    {/* Nume sub icon */}
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          marginTop: 8,
+                          textAlign: 'center',
+                          width: '90%',
+                          fontSize: 15,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 400,
+                          border: 'none',
+                          borderRadius: 0,
+                          background: 'transparent',
+                          boxShadow: 'none',
+                          outline: 'none'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ marginTop: 8, fontSize: 15, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : el.type === 'DESTROY' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
+                    <div style={{ fontSize: 44, color: '#7c3aed', fontWeight: 700, userSelect: 'none', lineHeight: 1 }}>✕</div>
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          marginTop: 4,
+                          textAlign: 'center',
+                          width: '90%',
+                          fontSize: 15,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 400,
+                          border: 'none',
+                          borderRadius: 0,
+                          background: 'transparent',
+                          boxShadow: 'none',
+                          outline: 'none'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ marginTop: 4, fontSize: 15, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : el.type === 'ACTIVATION' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
+                    <div style={{ width: '6px', height: '80%', background: '#e5e7eb', borderRadius: '3px', border: 'none' }} />
+                  </div>
+                ) : el.type === 'OBJECT' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          marginTop: 0,
+                          textAlign: 'center',
+                          width: '90%',
+                          fontSize: 15,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 400,
+                          border: 'none',
+                          borderRadius: 0,
+                          background: 'transparent',
+                          boxShadow: 'none',
+                          outline: 'none'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 15, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : isClassType ? (
                   <div className="uml-class-box">
                     <div className="uml-class-header">
                       {el.type === 'INTERFACE' && <div className="uml-stereotype">«interface»</div>}
@@ -929,43 +1107,45 @@ const UMLEditor = () => {
                         <div className="uml-class-name">{el.name}</div>
                       )}
                     </div>
-                    <div 
-                      className="uml-class-section uml-attributes"
-                      onDoubleClick={(e) => handleAddAttribute(e, el.id)}
-                    >
-                      {(el.attributes || []).length === 0 ? (
-                        <div className="uml-empty-hint">dublu-click pentru atribute</div>
-                      ) : (
-                        el.attributes.map((attr, idx) => (
-                          editingMember?.elementId === el.id && 
-                          editingMember?.type === 'attribute' && 
-                          editingMember?.index === idx ? (
-                            <input
-                              key={idx}
-                              type="text"
-                              value={editMemberValue}
-                              onChange={(e) => setEditMemberValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') { e.preventDefault(); handleSaveMember(true); }
-                                if (e.key === 'Escape') { setEditingMember(null); setEditMemberValue(''); }
-                              }}
-                              onBlur={() => handleSaveMember(false)}
-                              autoFocus
-                              className="uml-member-input"
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          ) : (
-                            <div 
-                              key={idx} 
-                              className="uml-member"
-                              onDoubleClick={(e) => handleEditMember(e, el.id, 'attribute', idx, attr)}
-                            >
-                              {attr}
-                            </div>
-                          )
-                        ))
-                      )}
-                    </div>
+                    {el.type === 'CLASS' && (
+                      <div 
+                        className="uml-class-section uml-attributes"
+                        onDoubleClick={(e) => handleAddAttribute(e, el.id)}
+                      >
+                        {(el.attributes || []).length === 0 ? (
+                          <div className="uml-empty-hint">dublu-click pentru atribute</div>
+                        ) : (
+                          el.attributes.map((attr, idx) => (
+                            editingMember?.elementId === el.id && 
+                            editingMember?.type === 'attribute' && 
+                            editingMember?.index === idx ? (
+                              <input
+                                key={idx}
+                                type="text"
+                                value={editMemberValue}
+                                onChange={(e) => setEditMemberValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') { e.preventDefault(); handleSaveMember(true); }
+                                  if (e.key === 'Escape') { setEditingMember(null); setEditMemberValue(''); }
+                                }}
+                                onBlur={() => handleSaveMember(false)}
+                                autoFocus
+                                className="uml-member-input"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : (
+                              <div 
+                                key={idx} 
+                                className="uml-member"
+                                onDoubleClick={(e) => handleEditMember(e, el.id, 'attribute', idx, attr)}
+                              >
+                                {attr}
+                              </div>
+                            )
+                          ))
+                        )}
+                      </div>
+                    )}
                     <div 
                       className="uml-class-section uml-methods"
                       onDoubleClick={(e) => handleAddMethod(e, el.id)}
@@ -1005,7 +1185,6 @@ const UMLEditor = () => {
                     </div>
                   </div>
                 ) : (
-                  // Renderare element normal
                   <div className="element-content">
                     <span className="element-icon">{elementsList[el.type]?.icon}</span>
                     {editingElement === el.id ? (
@@ -1083,7 +1262,7 @@ const UMLEditor = () => {
                 </button>
                 
                 {/* Atribute pentru clase */}
-                {isClassType && (
+                {el && el.type === 'CLASS' && (
                   <div className="property-section">
                     <div className="property-section-header">
                       <label>Attributes:</label>

@@ -180,27 +180,28 @@
   margin-top: 12px;
 }
 
+
 .element-item {
   padding: 14px 16px;
-  background: #f9f5ff;
-  border: 1px solid #e9d5ff;
+  background: #ede9fe !important;
+  border: 1px solid #ddd6fe !important;
   border-radius: 12px;
   cursor: grab;
   display: flex;
   align-items: center;
   gap: 12px;
   font-size: 14px;
-  color: #5b21b6;
+  color: #5b21b6 !important;
   font-weight: 600;
   transition: all 0.2s ease;
   box-shadow: 0 1px 3px rgba(91, 33, 182, 0.06);
 }
 
 .element-item:hover {
-  background: #f3e8ff;
+  background: #f3e8ff !important;
   transform: translateX(4px);
   box-shadow: 0 2px 8px rgba(91, 33, 182, 0.12);
-  border-color: #ddd6fe;
+  border-color: #ddd6fe !important;
 }
 
 .element-item:active {
