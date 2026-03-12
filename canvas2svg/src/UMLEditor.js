@@ -1,6 +1,552 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './UMLEditor.css';
 import { useNavigate } from 'react-router-dom';
+
+// ============ HELPER FUNCTIONS FOR PATHFINDING ============
+
+/**
+ * Get bounding box of a UML element considering actual height
+ */
+function getElementBounds(el) {
+  let height = el.height || 120;
+  
+  // For CLASS/INTERFACE, calculate actual height based on content
+  if (el.type === 'CLASS' || el.type === 'INTERFACE') {
+    const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
+    const attrHeight = Math.max(30, (el.attributes?.length || 0) * 20 + 12);
+    const methodHeight = Math.max(30, (el.methods?.length || 0) * 20 + 12);
+    height = headerHeight + attrHeight + methodHeight;
+  }
+  
+  return {
+    x: el.x,
+    y: el.y,
+    width: el.width || 150,
+    height: height
+  };
+}
+
+/**
+ * Check if a line segment intersects with a rectangle
+ */
+function lineIntersectsRect(x1, y1, x2, y2, rect) {
+  const left = rect.x - 10;
+  const right = rect.x + rect.width + 10;
+  const top = rect.y - 10;
+  const bottom = rect.y + rect.height + 10;
+
+  // Check if line endpoints are inside rectangle
+  const p1Inside = x1 >= left && x1 <= right && y1 >= top && y1 <= bottom;
+  const p2Inside = x2 >= left && x2 <= right && y2 >= top && y2 <= bottom;
+  
+  if (p1Inside || p2Inside) return true;
+
+  // Check if line segment intersects rectangle edges
+  // Top edge
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, right, top)) return true;
+  // Bottom edge
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, bottom, right, bottom)) return true;
+  // Left edge
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, left, bottom)) return true;
+  // Right edge
+  if (lineSegmentsIntersect(x1, y1, x2, y2, right, top, right, bottom)) return true;
+
+  return false;
+}
+
+/**
+ * Check if two line segments intersect
+ */
+function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const ccw = (ax, ay, bx, by, cx, cy) => {
+    return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax);
+  };
+
+  return ccw(x1, y1, x3, y3, x4, y4) !== ccw(x2, y2, x3, y3, x4, y4) &&
+         ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
+}
+
+/**
+ * Calculate intersection of ray from center to a direction with rectangle bounds
+ * Returns point + which edge was hit (for proper arrow orientation)
+ */
+function getRectangleEdgePoint(centerX, centerY, width, height, angle) {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  
+  // Calculate t parameter for each edge
+  const edges = [];
+  
+  // Right edge
+  if (dx > 0) {
+    const t = halfWidth / dx;
+    edges.push({ t, x: centerX + halfWidth, y: centerY + dy * t, edge: 'right' });
+  }
+  // Left edge
+  if (dx < 0) {
+    const t = -halfWidth / dx;
+    edges.push({ t, x: centerX - halfWidth, y: centerY + dy * t, edge: 'left' });
+  }
+  
+  // Bottom edge
+  if (dy > 0) {
+    const t = halfHeight / dy;
+    edges.push({ t, x: centerX + dx * t, y: centerY + halfHeight, edge: 'bottom' });
+  }
+  // Top edge
+  if (dy < 0) {
+    const t = -halfHeight / dy;
+    edges.push({ t, x: centerX + dx * t, y: centerY - halfHeight, edge: 'top' });
+  }
+  
+  // Find the closest valid edge (smallest positive t)
+  const validEdges = edges.filter(e => e.t > 0);
+  if (validEdges.length === 0) return { x: centerX, y: centerY, edge: 'center' };
+  
+  const closest = validEdges.reduce((a, b) => a.t < b.t ? a : b);
+  return { x: closest.x, y: closest.y, edge: closest.edge };
+}
+
+/**
+ * Get 4 connection points on element's contour (top, bottom, left, right)
+ * Folosește coordonate absolute din element.x/y (canvas-relative)
+ */
+function getElementConnectionPoints(element, elementHeight) {
+  const centerX = element.x + (element.width || 150) / 2;
+  const centerY = element.y + elementHeight / 2;
+  const halfWidth = (element.width || 150) / 2;
+  const halfHeight = elementHeight / 2;
+  
+  return {
+    top: { x: centerX, y: element.y, point: 'top', radius: 8 },
+    bottom: { x: centerX, y: element.y + elementHeight, point: 'bottom', radius: 8 },
+    left: { x: element.x, y: centerY, point: 'left', radius: 8 },
+    right: { x: element.x + (element.width || 150), y: centerY, point: 'right', radius: 8 }
+  };
+}
+
+/**
+ * Get connection points based on actual DOM element bounds (canvas-relative)
+ * Folosit pentru a obține dimensiuni exacte din DOM
+ */
+function getActualElementConnectionPoints(domElement, canvasRef) {
+  if (!domElement || !canvasRef.current) return null;
+  
+  const domRect = domElement.getBoundingClientRect();
+  const canvasRect = canvasRef.current.getBoundingClientRect();
+  
+  // Convertesc din coordonate browser la coordonate relative la canvas
+  const x = domRect.left - canvasRect.left;
+  const y = domRect.top - canvasRect.top;
+  const width = domRect.width;
+  const height = domRect.height;
+  
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  
+  return {
+    top: { x: centerX, y: y, point: 'top' },
+    bottom: { x: centerX, y: y + height, point: 'bottom' },
+    left: { x: x, y: centerY, point: 'left' },
+    right: { x: x + width, y: centerY, point: 'right' }
+  };
+}
+
+/**
+ * Calculează cel mai apropiat punct pe conturul unui element relativ la o poziție dată
+ * Funcție universală pentru placement inițial și drag
+ */
+function findClosestBoundaryPoint(element, elementHeight, mouseX, mouseY, elementX, elementY) {
+  // Pentru Sequence Diagrams, snape la centrul vertical (lifeline)
+  const sequenceElements = ['ACTOR', 'OBJECT', 'ACTIVATION', 'DESTROY', 'BOUNDARY', 'CONTROL', 'ALT', 'LOOP'];
+  if (sequenceElements.includes(element.type)) {
+    const centerX = elementX + (element.width || 150) / 2;
+    const centerY = elementY + (elementHeight || 120) / 2;
+    // Snap to vertical line at element's center
+    return {
+      x: centerX,
+      y: mouseY, // Y from mouse position
+      point: 'center',
+      code: `center:${Math.round(centerX)},${Math.round(mouseY)}`
+    };
+  }
+  
+  const elW = element.width || 150;
+  const elH = elementHeight;
+  
+  // Calculez distanțe din mouse la fiecare margine (ca linii infinite)
+  const distTop = Math.abs(mouseY - elementY);
+  const distBottom = Math.abs(mouseY - (elementY + elH));
+  const distLeft = Math.abs(mouseX - elementX);
+  const distRight = Math.abs(mouseX - (elementX + elW));
+  
+  // Gasesc în margine e cea mai apropiată
+  const minDist = Math.min(distTop, distBottom, distLeft, distRight);
+  
+  let pointX, pointY, edgeType;
+  
+  if (minDist === distTop) {
+    // Top edge - clamp X
+    pointX = Math.max(elementX, Math.min(mouseX, elementX + elW));
+    pointY = elementY;
+    edgeType = 'top';
+  } else if (minDist === distBottom) {
+    // Bottom edge - clamp X
+    pointX = Math.max(elementX, Math.min(mouseX, elementX + elW));
+    pointY = elementY + elH;
+    edgeType = 'bottom';
+  } else if (minDist === distLeft) {
+    // Left edge - clamp Y
+    pointX = elementX;
+    pointY = Math.max(elementY, Math.min(mouseY, elementY + elH));
+    edgeType = 'left';
+  } else {
+    // Right edge - clamp Y
+    pointX = elementX + elW;
+    pointY = Math.max(elementY, Math.min(mouseY, elementY + elH));
+    edgeType = 'right';
+  }
+  
+  return {
+    x: pointX,
+    y: pointY,
+    point: edgeType,
+    code: `${edgeType}:${Math.round(pointX)},${Math.round(pointY)}`
+  };
+}
+
+/**
+ * Detectează click oriunde pe conturul elementului și returnează punctul exact pe perimetru
+ * Folosește funcția helper findClosestBoundaryPoint
+ */
+function detectConnectionPointOnContour(e, element, elementHeight) {
+  const canvasRef_local = document.querySelector('.uml-canvas');
+  if (!canvasRef_local) return null;
+  
+  const canvasRect = canvasRef_local.getBoundingClientRect();
+  const elementDOMRect = e.currentTarget.getBoundingClientRect();
+  
+  // Click position relativ la canvas
+  const clickCanvasX = e.clientX - canvasRect.left;
+  const clickCanvasY = e.clientY - canvasRect.top;
+  
+  // Element bounds pe canvas bazate pe DOM rendering actual
+  const elCanvasX = elementDOMRect.left - canvasRect.left;
+  const elCanvasY = elementDOMRect.top - canvasRect.top;
+  const elCanvasWidth = elementDOMRect.width;
+  const elCanvasHeight = elementDOMRect.height;
+  
+  console.log(`Click canvas (${clickCanvasX}, ${clickCanvasY}), element DOM bounds: x=${elCanvasX}, y=${elCanvasY}, w=${elCanvasWidth}, h=${elCanvasHeight}`);
+  
+  // Calculez cel mai apropiat punct pe marginea elementului DOM
+  const distTop = Math.abs(clickCanvasY - elCanvasY);
+  const distBottom = Math.abs(clickCanvasY - (elCanvasY + elCanvasHeight));
+  const distLeft = Math.abs(clickCanvasX - elCanvasX);
+  const distRight = Math.abs(clickCanvasX - (elCanvasX + elCanvasWidth));
+  
+  const minDist = Math.min(distTop, distBottom, distLeft, distRight);
+  
+  let pointX, pointY, edgeType;
+  
+  if (minDist === distTop) {
+    pointX = Math.max(elCanvasX, Math.min(clickCanvasX, elCanvasX + elCanvasWidth));
+    pointY = elCanvasY;
+    edgeType = 'top';
+  } else if (minDist === distBottom) {
+    pointX = Math.max(elCanvasX, Math.min(clickCanvasX, elCanvasX + elCanvasWidth));
+    pointY = elCanvasY + elCanvasHeight;
+    edgeType = 'bottom';
+  } else if (minDist === distLeft) {
+    pointX = elCanvasX;
+    pointY = Math.max(elCanvasY, Math.min(clickCanvasY, elCanvasY + elCanvasHeight));
+    edgeType = 'left';
+  } else {
+    pointX = elCanvasX + elCanvasWidth;
+    pointY = Math.max(elCanvasY, Math.min(clickCanvasY, elCanvasY + elCanvasHeight));
+    edgeType = 'right';
+  }
+  
+  const result = {
+    x: pointX,
+    y: pointY,
+    point: edgeType,
+    code: `${edgeType}:${Math.round(pointX)},${Math.round(pointY)}`
+  };
+  
+  console.log("Punct detected:", result);
+  return result;
+}
+
+/**
+ * Build orthogonal path through multiple waypoints with 90-degree corners
+ * Routes each segment with Manhattan/L-shaped routing
+ */
+function simplifyWaypoints(waypoints, tolerance = 5) {
+  if (waypoints.length <= 2) return waypoints;
+  
+  // Aggressive Douglas-Peucker simplification
+  // Removes ALL unnecessary intermediate points, keeps only direction changes
+  
+  const simplified = [waypoints[0]];
+  
+  for (let i = 1; i < waypoints.length; i++) {
+    const curr = waypoints[i];
+    const prev = simplified[simplified.length - 1];
+    
+    if (simplified.length < 2) {
+      simplified.push(curr);
+    } else {
+      const prevPrev = simplified[simplified.length - 2];
+      
+      // Check if we're continuing in EXACT same direction (horizontal or vertical)
+      const wasHorizontal = Math.abs(prevPrev.y - prev.y) < 0.1;
+      const isHorizontal = Math.abs(prev.y - curr.y) < 0.1;
+      const wasVertical = Math.abs(prevPrev.x - prev.x) < 0.1;
+      const isVertical = Math.abs(prev.x - curr.x) < 0.1;
+      
+      // Only add point if direction actually changed
+      if ((wasHorizontal && isHorizontal) || (wasVertical && isVertical)) {
+        // Same direction - skip this waypoint, move directly to current
+        // But first check if we'd be backtracking
+        const backtrackingH = wasHorizontal && ((prevPrev.x < prev.x && curr.x < prev.x) || (prevPrev.x > prev.x && curr.x > prev.x));
+        const backtrackingV = wasVertical && ((prevPrev.y < prev.y && curr.y < prev.y) || (prevPrev.y > prev.y && curr.y > prev.y));
+        
+        if (!backtrackingH && !backtrackingV) {
+          // Extend the line, replace the waypoint
+          simplified[simplified.length - 1] = curr;
+        } else {
+          // Direction reversal detected, keep the waypoint
+          simplified.push(curr);
+        }
+      } else {
+        // Direction changed - keep this point
+        simplified.push(curr);
+      }
+    }
+  }
+  
+  return simplified;
+}
+
+function buildOrthogonalPathThroughWaypoints(waypoints) {
+  if (waypoints.length === 0) return '';
+  if (waypoints.length === 1) {
+    return `M ${Math.round(waypoints[0].x)},${Math.round(waypoints[0].y)}`;
+  }
+  
+  // Simplify waypoints to remove unnecessary intermediate points
+  const simplified = simplifyWaypoints(waypoints);
+  
+  const path = [simplified[0]];
+  
+  // Route orthogonally between each pair of consecutive waypoints
+  for (let i = 0; i < simplified.length - 1; i++) {
+    const from = simplified[i];
+    const to = simplified[i + 1];
+    
+    // Use L-shaped routing: go horizontal first, then vertical
+    const midX = to.x;
+    const midY = from.y;
+    
+    if (midX !== from.x) {
+      path.push({ x: midX, y: from.y });
+    }
+    if (midY !== to.y) {
+      path.push({ x: to.x, y: midY });
+    }
+    path.push(to);
+  }
+  
+  // Remove consecutive duplicates
+  const cleanPath = [];
+  for (const pt of path) {
+    if (cleanPath.length === 0 || 
+        cleanPath[cleanPath.length - 1].x !== pt.x || 
+        cleanPath[cleanPath.length - 1].y !== pt.y) {
+      cleanPath.push(pt);
+    }
+  }
+  
+  let d = `M ${Math.round(cleanPath[0].x)},${Math.round(cleanPath[0].y)}`;
+  for (let i = 1; i < cleanPath.length; i++) {
+    d += ` L ${Math.round(cleanPath[i].x)},${Math.round(cleanPath[i].y)}`;
+  }
+  return d;
+}
+
+
+/**
+ * Convert waypoints to SVG path string (with straight lines and corners)
+ */
+function waypointsToPath(points) {
+  if (points.length === 0) return '';
+  
+  // Simplify waypoints to remove unnecessary intermediate points
+  const simplified = simplifyWaypoints(points);
+  
+  let d = `M ${Math.round(simplified[0].x)},${Math.round(simplified[0].y)}`;
+  for (let i = 1; i < simplified.length; i++) {
+    d += ` L ${Math.round(simplified[i].x)},${Math.round(simplified[i].y)}`;
+  }
+  return d;
+}
+function findPathAroundObstacles(x1, y1, x2, y2, elements, excludeIds = [], targetEdge = null) {
+  const path = [{ x: x1, y: y1 }];
+  
+  // Get all obstacles (exclude start and end elements)
+  const obstacles = elements
+    .filter(el => !excludeIds.includes(el.id))
+    .map(el => getElementBounds(el));
+
+  // Check if direct path intersects any obstacles
+  let directPathClear = true;
+  for (const obstacle of obstacles) {
+    if (lineIntersectsRect(x1, y1, x2, y2, obstacle)) {
+      directPathClear = false;
+      break;
+    }
+  }
+
+  if (directPathClear) {
+    // No obstacles in the way, use direct path with Manhattan routing
+    // Build perpendicular approach based on target edge
+    if (targetEdge === 'top' || targetEdge === 'bottom') {
+      // Arrow hits horizontal edge - final segment should be vertical
+      // So move horizontally first, then vertically
+      path.push({ x: x2, y: y1 });
+      path.push({ x: x2, y: y2 });
+    } else if (targetEdge === 'left' || targetEdge === 'right') {
+      // Arrow hits vertical edge - final segment should be horizontal
+      // So move vertically first, then horizontally
+      path.push({ x: x1, y: y2 });
+      path.push({ x: x2, y: y2 });
+    } else {
+      // No edge info, use default approach (horizontal then vertical)
+      const midX = x1 + (x2 - x1) * 0.5;
+      path.push({ x: midX, y: y1 });
+      path.push({ x: midX, y: y2 });
+      path.push({ x: x2, y: y2 });
+    }
+    return path;
+  }
+
+  // Find obstacles that intersect the direct path
+  const blockingObstacles = obstacles.filter(obs => lineIntersectsRect(x1, y1, x2, y2, obs));
+  
+  if (blockingObstacles.length === 0) {
+    const midX = x1 + (x2 - x1) * 0.5;
+    path.push({ x: midX, y: y1 });
+    path.push({ x: midX, y: y2 });
+    path.push({ x: x2, y: y2 });
+    return path;
+  }
+
+  // Find the closest blocking obstacle to the start point
+  const closestObstacle = blockingObstacles.reduce((closest, obs) => {
+    const distToStart = Math.hypot(
+      (obs.x + obs.width / 2) - x1,
+      (obs.y + obs.height / 2) - y1
+    );
+    const closestDist = Math.hypot(
+      (closest.x + closest.width / 2) - x1,
+      (closest.y + closest.height / 2) - y1
+    );
+    return distToStart < closestDist ? obs : closest;
+  });
+
+  const padding = 20;
+  
+  // Try multiple routing strategies and pick the shortest
+  const strategies = [];
+
+  // Strategy 1: Go right/left first, then up/down
+  const midX1 = closestObstacle.x + closestObstacle.width + padding;
+  const route1 = [
+    { x: midX1, y: y1 },
+    { x: midX1, y: y2 }
+  ];
+  strategies.push(route1);
+
+  // Strategy 2: Go left first, then up/down
+  const midX2 = closestObstacle.x - padding;
+  const route2 = [
+    { x: midX2, y: y1 },
+    { x: midX2, y: y2 }
+  ];
+  strategies.push(route2);
+
+  // Strategy 3: Go up/down first, then right/left
+  const midY1 = closestObstacle.y - padding;
+  const route3 = [
+    { x: x1, y: midY1 },
+    { x: x2, y: midY1 }
+  ];
+  strategies.push(route3);
+
+  // Strategy 4: Go down first, then right/left
+  const midY2 = closestObstacle.y + closestObstacle.height + padding;
+  const route4 = [
+    { x: x1, y: midY2 },
+    { x: x2, y: midY2 }
+  ];
+  strategies.push(route4);
+
+  // Pick the strategy that doesn't intersect obstacles
+  let bestRoute = route1;
+  
+  for (const route of strategies) {
+    let routeValid = true;
+    // Check if this route clears the obstacle
+    for (let i = 0; i < route.length; i++) {
+      const segStart = i === 0 ? { x: x1, y: y1 } : route[i - 1];
+      const segEnd = route[i];
+      
+      if (lineIntersectsRect(segStart.x, segStart.y, segEnd.x, segEnd.y, closestObstacle)) {
+        routeValid = false;
+        break;
+      }
+    }
+    
+    if (routeValid) {
+      // Check last segment to destination
+      const lastEnd = bestRoute[bestRoute.length - 1];
+      if (!lineIntersectsRect(lastEnd.x, lastEnd.y, x2, y2, closestObstacle)) {
+        bestRoute = route;
+        break;
+      }
+    }
+  }
+
+  // Add the best route
+  for (const wp of bestRoute) {
+    path.push(wp);
+  }
+  
+  // Add final approach to ensure perpendicular alignment with target edge
+  const lastWaypoint = bestRoute[bestRoute.length - 1];
+  
+  if (targetEdge === 'top' || targetEdge === 'bottom') {
+    // Arrow hits horizontal edge - final segment should be vertical (same X, different Y)
+    if (Math.abs(lastWaypoint.x - x2) > 1) {
+      path.push({ x: x2, y: lastWaypoint.y });
+    }
+  } else if (targetEdge === 'left' || targetEdge === 'right') {
+    // Arrow hits vertical edge - final segment should be horizontal (different X, same Y)
+    if (Math.abs(lastWaypoint.y - y2) > 1) {
+      path.push({ x: lastWaypoint.x, y: y2 });
+    }
+  }
+  
+  path.push({ x: x2, y: y2 });
+
+  return path;
+}
+
+// ============ END HELPER FUNCTIONS ============
+
 // Elemente pentru Class Diagram
 const CLASS_ELEMENTS = {
   CLASS: { label: 'Class', icon: 'C', color: '#fffef0', isNode: true },
@@ -115,9 +661,12 @@ const UMLEditor = () => {
   const [movingElement, setMovingElement] = useState(null);
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
   
-  // Pentru crearea conexiunilor
+  // Pentru crearea conexiunilor - cu selectare de puncte pe contur
   const [connectionMode, setConnectionMode] = useState(null); // tipul de conexiune
-  const [connectionStart, setConnectionStart] = useState(null); // elementul de start
+  const [connectionStart, setConnectionStart] = useState(null); // { elementId, point: 'top'|'bottom'|'left'|'right' }
+  const [connectionStartPoint, setConnectionStartPoint] = useState(null); // punctul selectat pe elementul start
+  const [hoveringConnectionPoint, setHoveringConnectionPoint] = useState(null); // { elementId, point } - pentru hover effect
+  const [hoveringConnectionElement, setHoveringConnectionElement] = useState(null); // elementId - pentru hover feedback în connection mode
 
   // Pentru editare inline atribute/metode
   const [editingMember, setEditingMember] = useState(null); // {elementId, type: 'attribute'|'method', index}
@@ -125,6 +674,13 @@ const UMLEditor = () => {
 
   // Pentru resize elemente
   const [resizing, setResizing] = useState(null); // {elementId, direction, startX, startY, startWidth, startHeight, startElX, startElY}
+
+  // Pentru control points pe liniile de conexiune
+  const [draggingControlPoint, setDraggingControlPoint] = useState(null); // {connectionId, pointIndex, startX, startY}
+  const [selectedConnection, setSelectedConnection] = useState(null); // ID-ul conexiunii selectate pentru editare
+
+  // Pentru drag endpoint-uri (start/end points ale conexiunilor)
+  const [draggingEndpoint, setDraggingEndpoint] = useState(null); // {connectionId, endpointType: 'from'|'to', startX, startY}
 
   const getElementsList = () => {
     switch (selectedType) {
@@ -232,27 +788,56 @@ const UMLEditor = () => {
     setDraggingInCanvas(false);
   };
 
-  // Click pe element - selectare sau conexiune
+  // Click pe element - selectare sau conexiune (cu selectare de puncte pe contur)
   const handleElementClick = (e, element) => {
     e.stopPropagation();
     
     // Dacă suntem în modul conexiune
     if (connectionMode) {
+      // Obțin înălțimea reală a elementului
+      let elementHeight = element.height || 120;
+      if (element.type === 'CLASS' || element.type === 'INTERFACE') {
+        const headerHeight = element.type === 'INTERFACE' ? 50 : 36;
+        const attrHeight = Math.max(30, (element.attributes?.length || 0) * 20 + 12);
+        const methodHeight = Math.max(30, (element.methods?.length || 0) * 20 + 12);
+        elementHeight = headerHeight + attrHeight + methodHeight;
+      }
+      
+      // Detectez care punct de pe contur a fost apăsat (oriunde pe contur, nu doar pe punctele predefinite)
+      const clickedPoint = detectConnectionPointOnContour(e, element, elementHeight);
+      
+      console.log(`Click pe element ${element.id}, detectat:`, clickedPoint, `connectionStart:`, connectionStart);
+      
+      if (!clickedPoint) {
+        // Clicul nu a fost pe un punct de pe contur
+        console.log("Click nu e pe contur");
+        return;
+      }
+      
       if (!connectionStart) {
-        // Setăm elementul de start
-        setConnectionStart(element.id);
-      } else if (connectionStart !== element.id) {
-        // Creăm conexiunea
+        // Selectez punctul de start
+        setConnectionStart({ elementId: element.id, point: clickedPoint });
+        setHoveringConnectionPoint(null);
+        console.log(`Punct START selectat: ${clickedPoint.point} la (${Math.round(clickedPoint.x)}, ${Math.round(clickedPoint.y)}) pe element ${element.id}`);
+      } else if (connectionStart.elementId !== element.id) {
+        // Selectez punctul de destinație și creez conexiunea
+        console.log("Creez conexiune către", element.id);
         const newConnection = {
           id: Date.now(),
           type: connectionMode,
-          from: connectionStart,
+          from: connectionStart.elementId,
+          fromPoint: connectionStart.point, // obiect cu {x, y, point, code}
           to: element.id,
+          toPoint: clickedPoint, // obiect cu {x, y, point, code}
           label: getElementsList()[connectionMode].label
         };
         setConnections([...connections, newConnection]);
         setConnectionMode(null);
         setConnectionStart(null);
+        setHoveringConnectionPoint(null);
+        console.log(`Conexiune creată: ${connectionStart.elementId} -> ${element.id}`);
+      } else {
+        console.log("Aceeași element - click pe START din nou");
       }
       return;
     }
@@ -324,11 +909,51 @@ const UMLEditor = () => {
         return; // Nu permite mutarea dacă ar cauza suprapunere
       }
       
-      setElements(elements.map(el => 
+      const deltaX = newX - currentEl.x;
+      const deltaY = newY - currentEl.y;
+      
+      // Actualizează elementul
+      const updatedElements = elements.map(el => 
         el.id === movingElement 
           ? { ...el, x: newX, y: newY }
           : el
-      ));
+      );
+      
+      // Actualizează și conexiunile atașate la elementul care se mută
+      const updatedConnections = connections.map(conn => {
+        let updated = { ...conn };
+        
+        // Dacă e o conexiune cu punct de start pe elementul care se mută
+        if (conn.from === movingElement && conn.fromPoint && typeof conn.fromPoint === 'object' && conn.fromPoint.x !== undefined) {
+          updated.fromPoint = {
+            ...conn.fromPoint,
+            x: conn.fromPoint.x + deltaX,
+            y: conn.fromPoint.y + deltaY
+          };
+        }
+        
+        // Dacă e o conexiune cu punct de final pe elementul care se mută
+        if (conn.to === movingElement && conn.toPoint && typeof conn.toPoint === 'object' && conn.toPoint.x !== undefined) {
+          updated.toPoint = {
+            ...conn.toPoint,
+            x: conn.toPoint.x + deltaX,
+            y: conn.toPoint.y + deltaY
+          };
+        }
+        
+        // Actualizează și control points dacă sunt relative la element care se mută
+        if (conn.controlPoints && (conn.from === movingElement || conn.to === movingElement)) {
+          updated.controlPoints = conn.controlPoints.map(cp => ({
+            x: cp.x + deltaX,
+            y: cp.y + deltaY
+          }));
+        }
+        
+        return updated;
+      });
+      
+      setElements(updatedElements);
+      setConnections(updatedConnections);
     };
 
     const handleMouseUp = () => {
@@ -344,7 +969,7 @@ const UMLEditor = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [movingElement, moveOffset, elements]);
+  }, [movingElement, moveOffset, elements, connections]);
 
   // Resize element - mouse move
   useEffect(() => {
@@ -445,6 +1070,111 @@ const UMLEditor = () => {
     }
   };
 
+  // Handle dragging of control points
+  useEffect(() => {
+    const handleControlPointMove = (e) => {
+      if (!draggingControlPoint) return;
+      
+      const { connectionId, pointIndex, startX, startY } = draggingControlPoint;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      
+      const canvasRect = canvasRef.current.getBoundingClientRect();
+      const newX = e.clientX - canvasRect.left;
+      const newY = e.clientY - canvasRect.top;
+      
+      // Update the control point position
+      setConnections(connections.map(conn => {
+        if (conn.id === connectionId && conn.controlPoints) {
+          const newCPs = [...conn.controlPoints];
+          newCPs[pointIndex] = { ...newCPs[pointIndex], x: newX, y: newY };
+          
+          // Nu resortezi punctele - doar updatează poziția celui dragat
+          return { ...conn, controlPoints: newCPs };
+        }
+        return conn;
+      }));
+    };
+    
+    const handleControlPointUp = () => {
+      setDraggingControlPoint(null);
+    };
+    
+    if (draggingControlPoint) {
+      window.addEventListener('mousemove', handleControlPointMove);
+      window.addEventListener('mouseup', handleControlPointUp);
+    }
+    
+    return () => {
+      window.removeEventListener('mousemove', handleControlPointMove);
+      window.removeEventListener('mouseup', handleControlPointUp);
+    };
+  }, [draggingControlPoint, connections]);
+
+  // Handle dragging of endpoint (start/end points of connections)
+  useEffect(() => {
+    const handleEndpointMove = (e) => {
+      if (!draggingEndpoint || !canvasRef.current) return;
+      
+      const { connectionId, endpointType } = draggingEndpoint;
+      const canvasRect = canvasRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - canvasRect.left;
+      const mouseY = e.clientY - canvasRect.top;
+      
+      setConnections(prevConnections => {
+        const conn = prevConnections.find(c => c.id === connectionId);
+        if (!conn) return prevConnections;
+        
+        const element = elements.find(el => el.id === (endpointType === 'from' ? conn.from : conn.to));
+        if (!element) return prevConnections;
+        
+        // Calculate element height
+        let elementHeight = element.height || 120;
+        if (element.type === 'CLASS' || element.type === 'INTERFACE') {
+          const headerHeight = element.type === 'INTERFACE' ? 50 : 36;
+          const attrHeight = Math.max(30, (element.attributes?.length || 0) * 20 + 12);
+          const methodHeight = Math.max(30, (element.methods?.length || 0) * 20 + 12);
+          elementHeight = headerHeight + attrHeight + methodHeight;
+        }
+        
+        // Calculate element bounds
+        const elX = element.x;
+        const elY = element.y;
+        const elW = element.width || 150;
+        const elH = elementHeight;
+        
+        // Use the same helper function as initial placement for consistency
+        const newPoint = findClosestBoundaryPoint(element, elementHeight, mouseX, mouseY, elX, elY);
+        
+        // Update connection
+        return prevConnections.map(c => {
+          if (c.id === connectionId) {
+            if (endpointType === 'from') {
+              return { ...c, fromPoint: newPoint };
+            } else {
+              return { ...c, toPoint: newPoint };
+            }
+          }
+          return c;
+        });
+      });
+    };
+    
+    const handleEndpointUp = () => {
+      setDraggingEndpoint(null);
+    };
+    
+    if (draggingEndpoint) {
+      window.addEventListener('mousemove', handleEndpointMove);
+      window.addEventListener('mouseup', handleEndpointUp);
+    }
+    
+    return () => {
+      window.removeEventListener('mousemove', handleEndpointMove);
+      window.removeEventListener('mouseup', handleEndpointUp);
+    };
+  }, [draggingEndpoint, elements]);
+
   // Handler pentru export JSON
   const handleSaveJSON = () => {
     const data = JSON.stringify({ selectedType, elements, connections }, null, 2);
@@ -504,17 +1234,17 @@ const UMLEditor = () => {
     let svg = `<?xml version="1.0" encoding="UTF-8"?>\n`;
     svg += `<svg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}' viewBox='${minX} ${minY} ${width} ${height}'>\n`;
     svg += `<defs>
-      <marker id='arrowTriangle' markerWidth='16' markerHeight='16' refX='16' refY='8' orient='auto'>
-        <path d='M0,0 L0,16 L16,8 z' fill='white' stroke='#8b4513' stroke-width='2'/>
+      <marker id='arrowTriangle' markerWidth='18' markerHeight='18' refX='17' refY='9' orient='auto'>
+        <path d='M 0 0 L 18 9 L 0 18 Z' fill='white' stroke='#8b4513' stroke-width='2' stroke-linejoin='miter'/>
       </marker>
-      <marker id='arrowDiamond' markerWidth='16' markerHeight='16' refX='16' refY='8' orient='auto'>
-        <path d='M0,8 L8,0 L16,8 L8,16 z' fill='#8b4513' stroke='#8b4513'/>
+      <marker id='arrowDiamond' markerWidth='18' markerHeight='18' refX='17' refY='9' orient='auto'>
+        <path d='M 0 9 L 9 0 L 18 9 L 9 18 Z' fill='#8b4513' stroke='#8b4513' stroke-width='1'/>
       </marker>
-      <marker id='arrowSimple' markerWidth='12' markerHeight='12' refX='10' refY='6' orient='auto'>
-        <path d='M0,0 L12,6 L0,12' fill='none' stroke='#8b4513' stroke-width='2'/>
+      <marker id='arrowSimple' markerWidth='14' markerHeight='14' refX='13' refY='7' orient='auto'>
+        <path d='M 0 0 L 14 7 L 0 14' fill='none' stroke='#8b4513' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>
       </marker>
-      <marker id='arrowOpen' markerWidth='12' markerHeight='12' refX='10' refY='6' orient='auto'>
-        <path d='M0,0 L12,6 L0,12' fill='none' stroke='#8b4513' stroke-width='2'/>
+      <marker id='arrowOpen' markerWidth='14' markerHeight='14' refX='13' refY='7' orient='auto'>
+        <path d='M 0 0 L 14 7 L 0 14' fill='none' stroke='#8b4513' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>
       </marker>
     </defs>\n`;
 
@@ -537,29 +1267,147 @@ const UMLEditor = () => {
       
       const fromHeight = getElementHeightForCalc(fromEl);
       const toHeight = getElementHeightForCalc(toEl);
+      
+      let startX, startY, endX, endY, targetEdge;
+
+      // ALWAYS snap to cardinal points to match connection mode dots
       const fromX = fromEl.x + (fromEl.width || 150) / 2;
       const fromY = fromEl.y + fromHeight / 2;
       const toX = toEl.x + (toEl.width || 150) / 2;
       const toY = toEl.y + toHeight / 2;
       const angle = Math.atan2(toY - fromY, toX - fromX);
-      const startX = fromX + Math.cos(angle) * ((fromEl.width || 150) / 2);
-      const startY = fromY + Math.sin(angle) * (fromHeight / 2);
       
-      let markerOffset = 0;
-      if (conn.type === 'INHERITANCE' || conn.type === 'COMPOSITION') markerOffset = 16;
-      if (conn.type === 'ASSOCIATION') markerOffset = 12;
-      if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') markerOffset = 12;
-      if (conn.type === 'LINE_ARROW' || conn.type === 'DOTTED_ARROW') markerOffset = 10;
+      // Calculate which cardinal point is closest for a given angle
+      const getClosestCardinalPoint = (element, elementHeight, calcAngle) => {
+        const centerX = element.x + (element.width || 150) / 2;
+        const centerY = element.y + elementHeight / 2;
+        
+        // Normalize angle to 0-2π
+        let normalizedAngle = calcAngle;
+        if (normalizedAngle < 0) normalizedAngle += 2 * Math.PI;
+        
+        // Map angle ranges to cardinal directions
+        // 0° = right (0 to π/4 and 7π/4 to 2π)
+        // 90° = bottom (π/4 to 3π/4)
+        // 180° = left (3π/4 to 5π/4)
+        // 270° = top (5π/4 to 7π/4)
+        
+        if (normalizedAngle < Math.PI / 4 || normalizedAngle >= 7 * Math.PI / 4) {
+          // RIGHT point
+          return {
+            point: 'right',
+            x: element.x + (element.width || 150),
+            y: centerY,
+            edge: 'right'
+          };
+        } else if (normalizedAngle < 3 * Math.PI / 4) {
+          // BOTTOM point
+          return {
+            point: 'bottom',
+            x: centerX,
+            y: element.y + elementHeight,
+            edge: 'bottom'
+          };
+        } else if (normalizedAngle < 5 * Math.PI / 4) {
+          // LEFT point
+          return {
+            point: 'left',
+            x: element.x,
+            y: centerY,
+            edge: 'left'
+          };
+        } else {
+          // TOP point
+          return {
+            point: 'top',
+            x: centerX,
+            y: element.y,
+            edge: 'top'
+          };
+        }
+      };
       
-      const endX = toX - Math.cos(angle) * ((toEl.width || 150) / 2 + markerOffset);
-      const endY = toY - Math.sin(angle) * (toHeight / 2 + markerOffset);
-      return { startX, startY, endX, endY };
+      // Get cardinal points for FROM and TO elements
+      const fromCardinal = getClosestCardinalPoint(fromEl, fromHeight, angle);
+      const toCardinal = getClosestCardinalPoint(toEl, toHeight, angle + Math.PI);
+      
+      // Use explicit points if available, otherwise use cardinal snapping
+      if (conn.fromPoint && conn.toPoint) {
+        // Check if points are objects with exact coordinates (new format)
+        if (typeof conn.fromPoint === 'object' && conn.fromPoint.x !== undefined) {
+          // New format: exact coordinates
+          startX = conn.fromPoint.x;
+          startY = conn.fromPoint.y;
+          endX = conn.toPoint.x;
+          endY = conn.toPoint.y;
+          targetEdge = conn.toPoint.point;
+        } else {
+          // Old format: cardinal points
+          const fromPoints = getElementConnectionPoints(fromEl, fromHeight);
+          const toPoints = getElementConnectionPoints(toEl, toHeight);
+          const fromPoint = fromPoints[conn.fromPoint];
+          const toPoint = toPoints[conn.toPoint];
+          startX = fromPoint.x;
+          startY = fromPoint.y;
+          endX = toPoint.x;
+          endY = toPoint.y;
+          targetEdge = conn.toPoint;
+        }
+      } else {
+        // Use cardinal point snapping for old connections
+        startX = fromCardinal.x;
+        startY = fromCardinal.y;
+        endX = toCardinal.x;
+        endY = toCardinal.y;
+        targetEdge = toCardinal.edge;
+      }
+
+      // Adjust end point to stick out from the edge perpendicular to arrow direction
+      const arrowStickOut = 3;
+      if (targetEdge === 'top') {
+        endY -= arrowStickOut;
+      } else if (targetEdge === 'bottom') {
+        endY += arrowStickOut;
+      } else if (targetEdge === 'left') {
+        endX -= arrowStickOut;
+      } else if (targetEdge === 'right') {
+        endX += arrowStickOut;
+      }
+      
+      // Return edge info for pathfinding to ensure perpendicular approach
+      return { startX, startY, endX, endY, targetEdge };
     }
 
     // Conexiuni
     connections.forEach(conn => {
       const points = getConnectionPointsSVG(conn);
       if (!points) return;
+      
+      // Build waypoints - either through control points or direct
+      let waypoints;
+      if (conn.controlPoints && conn.controlPoints.length > 0) {
+        // Route through control points in order
+        waypoints = [{ x: points.startX, y: points.startY }];
+        for (const cp of conn.controlPoints) {
+          waypoints.push({ x: cp.x, y: cp.y });
+        }
+        waypoints.push({ x: points.endX, y: points.endY });
+      } else {
+        // Find path around obstacles with perpendicular approach based on target edge
+        waypoints = findPathAroundObstacles(
+          points.startX,
+          points.startY,
+          points.endX,
+          points.endY,
+          elements,
+          [conn.from, conn.to],
+          points.targetEdge
+        );
+      }
+      // Use orthogonal routing for control points, obstacle avoidance otherwise
+      const pathD = conn.controlPoints && conn.controlPoints.length > 0 
+        ? buildOrthogonalPathThroughWaypoints(waypoints) 
+        : waypointsToPath(waypoints);
       
       let marker = '';
       let strokeDasharray = 'none';
@@ -601,21 +1449,28 @@ const UMLEditor = () => {
         stroke = '#8b4513';
       }
       
-      let lineAttrs = `x1='${points.startX}' y1='${points.startY}' x2='${points.endX}' y2='${points.endY}' stroke='${stroke}' stroke-width='${strokeWidth}'`;
+      let pathAttrs = `d='${pathD}' stroke='${stroke}' stroke-width='${strokeWidth}' fill='none'`;
       if (strokeDasharray !== 'none') {
-        lineAttrs += ` stroke-dasharray='${strokeDasharray}'`;
+        pathAttrs += ` stroke-dasharray='${strokeDasharray}'`;
       }
       if (marker) {
-        lineAttrs += ` marker-end='${marker}'`;
+        pathAttrs += ` marker-end='${marker}'`;
       }
-      svg += `<line ${lineAttrs} />\n`;
+      svg += `<path ${pathAttrs} />\n`;
       
       // Adauga label pentru INCLUDE și EXTEND
       if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') {
         const midX = (points.startX + points.endX) / 2;
         const midY = (points.startY + points.endY) / 2;
+        // Calculate perpendicular offset based on line angle
+        const dx = points.endX - points.startX;
+        const dy = points.endY - points.startY;
+        const lineLength = Math.sqrt(dx * dx + dy * dy);
+        const perpDistance = 15;
+        const perpX = lineLength > 0 ? -dy / lineLength * perpDistance : 0;
+        const perpY = lineLength > 0 ? dx / lineLength * perpDistance : 0;
         const labelText = conn.type === 'INCLUDE' ? '&lt;&lt;include&gt;&gt;' : '&lt;&lt;extend&gt;&gt;';
-        svg += `<text x='${midX}' y='${midY - 8}' font-size='12' font-family='monospace' text-anchor='middle' fill='#8b4513' font-weight='500'>${labelText}</text>\n`;
+        svg += `<text x='${midX + perpX}' y='${midY + perpY - 6}' font-size='12' font-family='monospace' text-anchor='middle' fill='#8b4513' font-weight='500'>${labelText}</text>\n`;
       }
     });
 
@@ -879,37 +1734,190 @@ const UMLEditor = () => {
     return el.height;
   };
 
+  // Calculează punctele de conexiune pe baza coordonatelor REALE din DOM
+  const getActualConnectionPoints = (el) => {
+    if (!canvasRef.current) return null;
+    
+    // Cauta elementul DOM după id
+    const domElement = canvasRef.current.querySelector(`[data-element-id="${el.id}"]`);
+    if (!domElement) return null;
+    
+    const domRect = domElement.getBoundingClientRect();
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    
+    // Convertește din coordonate browser la coordonate relative la canvas
+    const x = domRect.left - canvasRect.left;
+    const y = domRect.top - canvasRect.top;
+    const width = domRect.width;
+    const height = domRect.height;
+    
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    
+    return {
+      top: { x: centerX, y: y, point: 'top' },
+      bottom: { x: centerX, y: y + height, point: 'bottom' },
+      left: { x: x, y: centerY, point: 'left' },
+      right: { x: x + width, y: centerY, point: 'right' }
+    };
+  };
+
   // Calculează punctele pentru o conexiune
   const getConnectionPoints = (conn) => {
     const fromEl = elements.find(el => el.id === conn.from);
     const toEl = elements.find(el => el.id === conn.to);
     if (!fromEl || !toEl) return null;
 
-    const fromHeight = getElementHeight(fromEl);
-    const toHeight = getElementHeight(toEl);
+    let startX, startY, endX, endY, targetEdge;
 
-    // Centrul elementelor
-    const fromX = fromEl.x + fromEl.width / 2;
-    const fromY = fromEl.y + fromHeight / 2;
-    const toX = toEl.x + toEl.width / 2;
-    const toY = toEl.y + toHeight / 2;
+    // TRY to get actual DOM positions first (most accurate)
+    const fromDomPoints = getActualConnectionPoints(fromEl);
+    const toDomPoints = getActualConnectionPoints(toEl);
 
-    // Calculează punctele de pe margine
-    const angle = Math.atan2(toY - fromY, toX - fromX);
+    // Dacă conexiunea are puncte selectate manual, le folosesc
+    if (conn.fromPoint && conn.toPoint) {
+      // Check if points are objects with exact coordinates (new format)
+      // or strings like 'top', 'bottom' (old format)
+      if (typeof conn.fromPoint === 'object' && conn.fromPoint.x !== undefined) {
+        // New format: exact coordinates
+        startX = conn.fromPoint.x;
+        startY = conn.fromPoint.y;
+        endX = conn.toPoint.x;
+        endY = conn.toPoint.y;
+        targetEdge = conn.toPoint.point;
+      } else {
+        // Old format: cardinal points
+        // Use actual DOM positions if available, otherwise fallback
+        if (fromDomPoints && toDomPoints && typeof conn.fromPoint === 'string') {
+          const fromPoint = fromDomPoints[conn.fromPoint];
+          const toPoint = toDomPoints[conn.toPoint];
+          startX = fromPoint.x;
+          startY = fromPoint.y;
+          endX = toPoint.x;
+          endY = toPoint.y;
+        } else {
+          // Fallback to calculated height
+          const fromHeight = getElementHeight(fromEl);
+          const toHeight = getElementHeight(toEl);
+          const fromPoints = getElementConnectionPoints(fromEl, fromHeight);
+          const toPoints = getElementConnectionPoints(toEl, toHeight);
+          
+          const fromPoint = fromPoints[conn.fromPoint];
+          const toPoint = toPoints[conn.toPoint];
+          
+          startX = fromPoint.x;
+          startY = fromPoint.y;
+          endX = toPoint.x;
+          endY = toPoint.y;
+        }
+        targetEdge = typeof conn.toPoint === 'string' ? conn.toPoint : conn.toPoint.point;
+      }
+    } else {
+      // Use actual DOM dimensions if available for better accuracy
+      if (fromDomPoints && toDomPoints) {
+        const angle = Math.atan2(
+          toDomPoints.bottom.y - fromDomPoints.bottom.y,
+          toDomPoints.right.x - fromDomPoints.right.x
+        );
+        
+        const getClosestCardinalFromDOM = (domPoints, calcAngle) => {
+          // Normalize angle to 0-2π
+          let normalizedAngle = calcAngle;
+          if (normalizedAngle < 0) normalizedAngle += 2 * Math.PI;
+          
+          // Pick cardinal direction based on angle
+          if (normalizedAngle < Math.PI / 4 || normalizedAngle >= 7 * Math.PI / 4) {
+            return { ...domPoints.right, edge: 'right' };
+          } else if (normalizedAngle < 3 * Math.PI / 4) {
+            return { ...domPoints.bottom, edge: 'bottom' };
+          } else if (normalizedAngle < 5 * Math.PI / 4) {
+            return { ...domPoints.left, edge: 'left' };
+          } else {
+            return { ...domPoints.top, edge: 'top' };
+          }
+        };
+        
+        const fromCardinal = getClosestCardinalFromDOM(fromDomPoints, angle);
+        const toCardinal = getClosestCardinalFromDOM(toDomPoints, angle + Math.PI);
+        
+        startX = fromCardinal.x;
+        startY = fromCardinal.y;
+        endX = toCardinal.x;
+        endY = toCardinal.y;
+        targetEdge = toCardinal.edge;
+      } else {
+        // Fallback: use calculated heights
+        const fromHeight = getElementHeight(fromEl);
+        const toHeight = getElementHeight(toEl);
+        const fromX = fromEl.x + fromEl.width / 2;
+        const fromY = fromEl.y + fromHeight / 2;
+        const toX = toEl.x + toEl.width / 2;
+        const toY = toEl.y + toHeight / 2;
+        const angle = Math.atan2(toY - fromY, toX - fromX);
 
-    const startX = fromX + Math.cos(angle) * (fromEl.width / 2);
-    const startY = fromY + Math.sin(angle) * (fromHeight / 2);
+        const getClosestCardinalPoint = (element, elementHeight, calcAngle) => {
+          const centerX = element.x + element.width / 2;
+          const centerY = element.y + elementHeight / 2;
+          
+          let normalizedAngle = calcAngle;
+          if (normalizedAngle < 0) normalizedAngle += 2 * Math.PI;
+          
+          if (normalizedAngle < Math.PI / 4 || normalizedAngle >= 7 * Math.PI / 4) {
+            return {
+              point: 'right',
+              x: element.x + element.width,
+              y: centerY,
+              edge: 'right'
+            };
+          } else if (normalizedAngle < 3 * Math.PI / 4) {
+            return {
+              point: 'bottom',
+              x: centerX,
+              y: element.y + elementHeight,
+              edge: 'bottom'
+            };
+          } else if (normalizedAngle < 5 * Math.PI / 4) {
+            return {
+              point: 'left',
+              x: element.x,
+              y: centerY,
+              edge: 'left'
+            };
+          } else {
+            return {
+              point: 'top',
+              x: centerX,
+              y: element.y,
+              edge: 'top'
+            };
+          }
+        };
 
-    // Offset pentru marker (săgeată)
-    let markerOffset = 0;
-    if (conn.type === 'INHERITANCE' || conn.type === 'COMPOSITION') markerOffset = 16;
-    if (conn.type === 'ASSOCIATION') markerOffset = 12;
-    if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') markerOffset = 12;
+        const fromCardinal = getClosestCardinalPoint(fromEl, fromHeight, angle);
+        const toCardinal = getClosestCardinalPoint(toEl, toHeight, angle + Math.PI);
+        
+        startX = fromCardinal.x;
+        startY = fromCardinal.y;
+        endX = toCardinal.x;
+        endY = toCardinal.y;
+        targetEdge = toCardinal.edge;
+      }
+    }
 
-    const endX = toX - Math.cos(angle) * (toEl.width / 2 + markerOffset);
-    const endY = toY - Math.sin(angle) * (toHeight / 2 + markerOffset);
+    // Adjust end point to stick out from the edge perpendicular to arrow direction
+    const arrowStickOut = 3;
+    if (targetEdge === 'top') {
+      endY -= arrowStickOut;
+    } else if (targetEdge === 'bottom') {
+      endY += arrowStickOut;
+    } else if (targetEdge === 'left') {
+      endX -= arrowStickOut;
+    } else if (targetEdge === 'right') {
+      endX += arrowStickOut;
+    }
 
-    return { startX, startY, endX, endY, midX: (startX + endX) / 2, midY: (startY + endY) / 2 };
+    // Return edge info for pathfinding to ensure perpendicular approach
+    return { startX, startY, endX, endY, midX: (startX + endX) / 2, midY: (startY + endY) / 2, targetEdge };
   };
 
   // Render arrow marker based on connection type
@@ -932,9 +1940,59 @@ const UMLEditor = () => {
 
   // Click pe canvas - deselect
   const handleCanvasClick = () => {
-    if (!connectionMode) {
-      setSelectedElement(null);
-      setEditingElement(null);
+    setSelectedElement(null);
+    setEditingElement(null);
+    setHoveringConnectionPoint(null);
+    setHoveringConnectionElement(null);
+    setSelectedConnection(null);
+    setConnectionMode(null);
+    setConnectionStart(null);
+  };
+
+  // Handler generic pentru click pe o linie de conexiune - adăugare/ștergere control points
+  const handleConnectionLineClick = (e, connId) => {
+    e.stopPropagation();
+    
+    // Detect if user wants to delete (Shift+click) or add control point
+    if (e.shiftKey) {
+      const conn = connections.find(c => c.id === connId);
+      if (conn && window.confirm(`Șterge conexiunea ${conn.label}?`)) {
+        handleDeleteConnection(connId);
+      }
+    } else {
+      // Add control point at click location
+      const canvasRect = canvasRef.current.getBoundingClientRect();
+      const clickX = e.clientX - canvasRect.left;
+      const clickY = e.clientY - canvasRect.top;
+      
+      // Add new control point
+      const conn = connections.find(c => c.id === connId);
+      if (!conn) return;
+      
+      const newControlPoints = conn.controlPoints ? [...conn.controlPoints] : [];
+      const pointId = Date.now();
+      newControlPoints.push({ x: clickX, y: clickY, id: pointId });
+      
+      // Update connection
+      const updatedConnections = connections.map(c => 
+        c.id === connId 
+          ? { ...c, controlPoints: newControlPoints }
+          : c
+      );
+      setConnections(updatedConnections);
+      
+      // Immediately start dragging the newly added control point
+      const pointIndex = newControlPoints.length - 1;
+      setDraggingControlPoint({
+        connectionId: connId,
+        pointIndex: pointIndex,
+        startX: clickX,
+        startY: clickY
+      });
+      
+      // Select this connection for control point editing
+      setSelectedConnection(connId);
+      console.log(`Control point adăugat și marcat pentru drag la conexiune ${connId} la (${clickX}, ${clickY})`);
     }
   };
 
@@ -942,6 +2000,8 @@ const UMLEditor = () => {
   const cancelConnectionMode = () => {
     setConnectionMode(null);
     setConnectionStart(null);
+    setConnectionStartPoint(null);
+    setHoveringConnectionPoint(null);
   };
 
   const elementsList = getElementsList();
@@ -1038,7 +2098,9 @@ const UMLEditor = () => {
         <div className="connection-mode-bar">
           <span>
             🔗 Mod conexiune: <strong>{getElementsList()[connectionMode].label}</strong>
-            {connectionStart ? ' - Click pe elementul destinație' : ' - Click pe elementul sursă'}
+            {connectionStart 
+              ? ` - Punct START selectat (${connectionStart.point}) • Click pe cercul destinației` 
+              : ' - Click pe cercurile colorate de pe contur'}
           </span>
           <button onClick={cancelConnectionMode}>Anulează (Esc)</button>
         </div>
@@ -1102,30 +2164,56 @@ const UMLEditor = () => {
           <svg className="connections-layer">
             <defs>
               {/* Arrow pentru inheritance (triunghi gol - UML standard) */}
-              <marker id="arrowTriangle" markerWidth="16" markerHeight="16" refX="16" refY="8" orient="auto">
-                <path d="M0,0 L0,16 L16,8 z" fill="white" stroke="#8b4513" strokeWidth="2"/>
+              <marker id="arrowTriangle" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
+                <path d="M 0 0 L 18 9 L 0 18 Z" fill="white" stroke="#8b4513" strokeWidth="2" strokeLinejoin="miter"/>
               </marker>
               {/* Arrow pentru composition (romb plin) */}
-              <marker id="arrowDiamond" markerWidth="16" markerHeight="16" refX="16" refY="8" orient="auto">
-                <path d="M0,8 L8,0 L16,8 L8,16 z" fill="#8b4513" stroke="#8b4513"/>
+              <marker id="arrowDiamond" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
+                <path d="M 0 9 L 9 0 L 18 9 L 9 18 Z" fill="#8b4513" stroke="#8b4513" strokeWidth="1"/>
               </marker>
               {/* Arrow simplu pentru association */}
-              <marker id="arrowSimple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-                <path d="M0,0 L12,6 L0,12" fill="none" stroke="#8b4513" strokeWidth="2"/>
+              <marker id="arrowSimple" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#8b4513" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </marker>
               {/* Arrow pentru aggregation (romb gol) */}
-              <marker id="arrowDiamondOpen" markerWidth="16" markerHeight="16" refX="16" refY="8" orient="auto">
-                <path d="M0,8 L8,0 L16,8 L8,16 z" fill="white" stroke="#8b4513" strokeWidth="2"/>
+              <marker id="arrowDiamondOpen" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
+                <path d="M 0 9 L 9 0 L 18 9 L 9 18 Z" fill="white" stroke="#8b4513" strokeWidth="2"/>
               </marker>
               {/* Arrow deschis pentru include/extend */}
-              <marker id="arrowOpen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-                <path d="M0,0 L12,6 L0,12" fill="none" stroke="#8b4513" strokeWidth="2"/>
+              <marker id="arrowOpen" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#8b4513" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </marker>
             </defs>
 
             {connections.map((conn) => {
               const points = getConnectionPoints(conn);
               if (!points) return null;
+
+              // Build waypoints - either through control points or direct
+              let waypoints;
+              if (conn.controlPoints && conn.controlPoints.length > 0) {
+                // Route through control points in order
+                waypoints = [{ x: points.startX, y: points.startY }];
+                for (const cp of conn.controlPoints) {
+                  waypoints.push({ x: cp.x, y: cp.y });
+                }
+                waypoints.push({ x: points.endX, y: points.endY });
+              } else {
+                // Find path around obstacles with perpendicular approach based on target edge
+                waypoints = findPathAroundObstacles(
+                  points.startX,
+                  points.startY,
+                  points.endX,
+                  points.endY,
+                  elements,
+                  [conn.from, conn.to],
+                  points.targetEdge
+                );
+              }
+              // Use orthogonal routing for control points, obstacle avoidance otherwise
+              const pathD = conn.controlPoints && conn.controlPoints.length > 0 
+                ? buildOrthogonalPathThroughWaypoints(waypoints) 
+                : waypointsToPath(waypoints);
 
               // Restaurare stil original pentru Class Diagram
               if (
@@ -1139,22 +2227,15 @@ const UMLEditor = () => {
                 else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
                 return (
                   <g key={conn.id} className="connection-group">
-                    <line
-                      x1={points.startX}
-                      y1={points.startY}
-                      x2={points.endX}
-                      y2={points.endY}
+                    <path
+                      d={pathD}
+                      fill="none"
                       stroke="#8b4513"
                       strokeWidth="2"
                       strokeDasharray="none"
                       markerEnd={marker}
                       className="connection-line"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`Șterge conexiunea ${conn.label}?`)) {
-                          handleDeleteConnection(conn.id);
-                        }
-                      }}
+                      onMouseDown={(e) => handleConnectionLineClick(e, conn.id)}
                     />
                   </g>
                 );
@@ -1177,29 +2258,29 @@ const UMLEditor = () => {
                 }
                 const midX = (points.startX + points.endX) / 2;
                 const midY = (points.startY + points.endY) / 2;
+                // Calculate perpendicular offset based on line angle
+                const dx = points.endX - points.startX;
+                const dy = points.endY - points.startY;
+                const lineLength = Math.sqrt(dx * dx + dy * dy);
+                const perpDistance = 15;
+                const perpX = lineLength > 0 ? -dy / lineLength * perpDistance : 0;
+                const perpY = lineLength > 0 ? dx / lineLength * perpDistance : 0;
                 return (
                   <g key={conn.id} className="connection-group">
-                    <line
-                      x1={points.startX}
-                      y1={points.startY}
-                      x2={points.endX}
-                      y2={points.endY}
+                    <path
+                      d={pathD}
+                      fill="none"
                       stroke="#8b4513"
                       strokeWidth="2"
                       strokeDasharray={strokeDasharray}
                       markerEnd={marker}
                       className="connection-line"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`Șterge conexiunea ${conn.label}?`)) {
-                          handleDeleteConnection(conn.id);
-                        }
-                      }}
+                      onMouseDown={(e) => handleConnectionLineClick(e, conn.id)}
                     />
                     {(conn.type === 'INCLUDE' || conn.type === 'EXTEND') && (
                       <text
-                        x={midX}
-                        y={midY - 12}
+                        x={midX + perpX}
+                        y={midY + perpY - 6}
                         fontSize="12"
                         fontFamily="monospace"
                         textAnchor="middle"
@@ -1232,23 +2313,40 @@ const UMLEditor = () => {
 
               return (
                 <g key={conn.id} className="connection-group">
-                  <line
-                    x1={points.startX}
-                    y1={points.startY}
-                    x2={points.endX}
-                    y2={points.endY}
+                  <path
+                    d={pathD}
+                    fill="none"
                     stroke={stroke}
                     strokeWidth="2"
                     strokeDasharray={strokeDasharray}
                     markerEnd={marker}
                     className="connection-line"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (window.confirm(`Șterge conexiunea ${conn.label}?`)) {
-                        handleDeleteConnection(conn.id);
-                      }
-                    }}
+                    onMouseDown={(e) => handleConnectionLineClick(e, conn.id)}
                   />
+                </g>
+              );
+            })}
+
+            {/* Endpoint visual markers - circles at start/end points when connection is selected */}
+            {connections.map((conn) => {
+              // Only show dots for selected connection
+              if (selectedConnection !== conn.id) return null;
+              
+              // Get the connection endpoints
+              if (!conn.fromPoint || typeof conn.fromPoint !== 'object' || !conn.fromPoint.x) return null;
+              if (!conn.toPoint || typeof conn.toPoint !== 'object' || !conn.toPoint.x) return null;
+              
+              const fromX = conn.fromPoint.x;
+              const fromY = conn.fromPoint.y;
+              const toX = conn.toPoint.x;
+              const toY = conn.toPoint.y;
+              
+              return (
+                <g key={`endpoints-${conn.id}`}>
+                  {/* Start point - red dot */}
+                  <circle cx={fromX} cy={fromY} r="6" fill="#ff6b6b" stroke="#333" strokeWidth="1" />
+                  {/* End point - cyan dot */}
+                  <circle cx={toX} cy={toY} r="6" fill="#4ecdc4" stroke="#333" strokeWidth="1" />
                 </g>
               );
             })}
@@ -1266,7 +2364,8 @@ const UMLEditor = () => {
             return (
               <div
                 key={el.id}
-                className={`uml-element ${isClassType ? 'uml-class-element' : ''} ${selectedElement === el.id ? 'selected' : ''} ${editingElement === el.id ? 'editing' : ''} ${connectionStart === el.id ? 'connection-source' : ''} ${movingElement === el.id ? 'moving' : ''}`}
+                data-element-id={el.id}
+                className={`uml-element ${isClassType ? 'uml-class-element' : ''} ${selectedElement === el.id ? 'selected' : ''} ${editingElement === el.id ? 'editing' : ''} ${connectionStart?.elementId === el.id ? 'connection-source' : ''} ${movingElement === el.id ? 'moving' : ''}`}
                 style={{
                   left: `${el.x}px`,
                   top: `${el.y}px`,
@@ -1274,13 +2373,24 @@ const UMLEditor = () => {
                   minHeight: `${el.height}px`,
                   backgroundColor: isActor || isControl || isAlt || isBoundary || isDestroy ? 'transparent' : (isClassType ? '#fffef0' : '#ede9fe'),
                   color: '#5b21b6',
-                  border: isAlt ? '2px solid #a78bfa' : (isClassType ? '2px solid #a78bfa' : 'none'),
-                  boxShadow: isActor || isControl || isAlt || isBoundary || isDestroy ? 'none' : undefined,
-                  padding: isActor || isControl || isAlt || isBoundary || isDestroy ? 0 : undefined
+                  border: connectionMode 
+                    ? (hoveringConnectionElement === el.id ? '12px solid #ec4899' : '10px dashed #a78bfa')
+                    : (isAlt ? '2px solid #a78bfa' : (isClassType ? '2px solid #a78bfa' : 'none')),
+                  boxShadow: connectionMode && hoveringConnectionElement === el.id
+                    ? '0 0 20px rgba(236, 72, 153, 0.6), inset 0 0 10px rgba(236, 72, 153, 0.2)'
+                    : (isActor || isControl || isAlt || isBoundary || isDestroy ? 'none' : undefined),
+                  padding: isActor || isControl || isAlt || isBoundary || isDestroy ? 0 : undefined,
+                  transition: 'border 0.15s ease, box-shadow 0.15s ease',
+                  cursor: connectionMode ? 'crosshair' : 'move',
+                  outline: connectionMode ? '3px solid rgba(236, 72, 153, 0.4)' : 'none',
+                  outlineOffset: connectionMode ? '2px' : '0px',
+                  boxSizing: 'border-box'
                 }}
                 onClick={(e) => handleElementClick(e, el)}
                 onDoubleClick={(e) => handleElementDoubleClick(e, el)}
                 onMouseDown={(e) => handleElementMouseDown(e, el)}
+                onMouseEnter={() => connectionMode && setHoveringConnectionElement(el.id)}
+                onMouseLeave={() => setHoveringConnectionElement(null)}
               >
                 {(isActor || isControl || isBoundary || isAlt) ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
@@ -1621,6 +2731,150 @@ const UMLEditor = () => {
                 )}
               </div>
             );
+          })}
+
+          {/* Punctele de control pe conexiuni - draggable */}
+          {connections.map((conn) => {
+            if (!conn.controlPoints || conn.controlPoints.length === 0) return null;
+            
+            return conn.controlPoints.map((cp, idx) => {
+              const isDragging = draggingControlPoint?.connectionId === conn.id && draggingControlPoint?.pointIndex === idx;
+              
+              // Ascund punctele de control dacă nu sunt în drag
+              if (!isDragging) return null;
+              
+              const size = isDragging ? 10 : 6;
+              
+              return (
+                <div
+                  key={`cp-${conn.id}-${idx}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${cp.x - size}px`,
+                    top: `${cp.y - size}px`,
+                    width: `${size * 2}px`,
+                    height: `${size * 2}px`,
+                    borderRadius: '50%',
+                    backgroundColor: '#f59e0b',
+                    border: `2px solid #d97706`,
+                    cursor: 'grab',
+                    zIndex: 900,
+                    pointerEvents: 'auto',
+                    transition: 'all 0.2s ease'
+                  }}
+                  title={`Control point ${idx + 1} - Drag to move, Alt+Click to delete`}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    
+                    if (e.altKey) {
+                      // Delete control point
+                      const newCPs = conn.controlPoints.filter((_, i) => i !== idx);
+                      setConnections(connections.map(c =>
+                        c.id === conn.id
+                          ? { ...c, controlPoints: newCPs }
+                          : c
+                      ));
+                      return;
+                    }
+                    
+                    // Start dragging
+                    setDraggingControlPoint({
+                      connectionId: conn.id,
+                      pointIndex: idx,
+                      startX: e.clientX,
+                      startY: e.clientY
+                    });
+                    setSelectedConnection(conn.id);
+                  }}
+                />
+              );
+            });
+          })}
+
+          {/* Endpoint markers - invisible but draggable with large hit area */}
+          {connections.map((conn) => {
+            // Get the connection points
+            const getEndpointCoords = () => {
+              // Check if we have explicit coordinate-based points
+              if (conn.fromPoint && typeof conn.fromPoint === 'object' && conn.fromPoint.x !== undefined) {
+                return {
+                  from: { x: conn.fromPoint.x, y: conn.fromPoint.y },
+                  to: { x: conn.toPoint.x, y: conn.toPoint.y }
+                };
+              }
+              return null;
+            };
+            
+            const endpoints = getEndpointCoords();
+            if (!endpoints) return null;
+            
+            const hitSize = 15; // Large hit area for easy dragging
+            
+            return [
+              // Start point - invisible but draggable
+              <div
+                key={`ep-from-${conn.id}`}
+                style={{
+                  position: 'absolute',
+                  left: `${endpoints.from.x - hitSize}px`,
+                  top: `${endpoints.from.y - hitSize}px`,
+                  width: `${hitSize * 2}px`,
+                  height: `${hitSize * 2}px`,
+                  borderRadius: '50%',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: 'grab',
+                  zIndex: 850,
+                  pointerEvents: 'auto'
+                }}
+                title="Drag to move start point"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setDraggingEndpoint({
+                    connectionId: conn.id,
+                    endpointType: 'from',
+                    startX: e.clientX,
+                    startY: e.clientY
+                  });
+                  setSelectedConnection(conn.id);
+                }}
+              />,
+              // End point - invisible but draggable
+              <div
+                key={`ep-to-${conn.id}`}
+                style={{
+                  position: 'absolute',
+                  left: `${endpoints.to.x - hitSize}px`,
+                  top: `${endpoints.to.y - hitSize}px`,
+                  width: `${hitSize * 2}px`,
+                  height: `${hitSize * 2}px`,
+                  borderRadius: '50%',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: 'grab',
+                  zIndex: 850,
+                  pointerEvents: 'auto'
+                }}
+                title="Drag to move end point"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setDraggingEndpoint({
+                    connectionId: conn.id,
+                    endpointType: 'to',
+                    startX: e.clientX,
+                    startY: e.clientY
+                  });
+                  setSelectedConnection(conn.id);
+                }}
+              />
+            ];
+          })}
+
+          {/* Endpoint visual markers disabled - showing in SVG instead */}
+          {connectionMode && elements.map((el) => {
+            // Nu mai afișez punctele verzi - user-ul va click direct pe contur
+            // Detectarea se face în handleElementClick care apelează detectConnectionPointOnContour
+            return null;
           })}
         </div>
 
