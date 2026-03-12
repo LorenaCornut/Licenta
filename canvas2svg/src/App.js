@@ -10,6 +10,7 @@ import Dashboard from './Dashboard';
 import GraphEditor from './GraphEditor';
 import OrientedGraphEditor from './OrientedGraphEditor';
 import UMLEditor from './UMLEditor';
+import StateEditor from './StateEditor';
 import Settings from './Settings';
 import './App.css';
 
@@ -34,6 +35,8 @@ function App() {
         <Route path="/orientedgraph/:diagramId" element={<OrientedGraphEditor />} />
         <Route path="/uml" element={<UMLEditor />} />
         <Route path="/uml/:diagramId" element={<UMLEditor />} />
+        <Route path="/state" element={<StateEditor />} />
+        <Route path="/state/:diagramId" element={<StateEditor />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
     </Router>
