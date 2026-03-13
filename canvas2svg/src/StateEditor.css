@@ -334,11 +334,10 @@
 }
 
 .state-element.STATE {
-  background-color: #f3e8ff;
-  border: 2px solid #a78bfa;
-  border-radius: 12px;
-  min-width: 120px;
-  min-height: 80px;
+  background-color: transparent;
+  border: none;
+  min-width: 100px;
+  min-height: 100px;
 }
 
 .state-element.INITIAL {
@@ -361,8 +360,8 @@
 }
 
 .state-element.STATE.selected {
-  border-color: #7c3aed;
-  background-color: #ede9fe;
+  border-color: transparent;
+  background-color: transparent;
 }
 
 .state-element.editing {
@@ -379,22 +378,17 @@
   padding: 6px;
 }
 
-.inline-edit {
-  width: 90%;
-  padding: 6px 8px;
+.svg-inline-edit {
   font-size: 14px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto';
   border: 2px solid #7c3aed;
-  border-radius: 8px;
+  border-radius: 4px;
   text-align: center;
   outline: none;
   font-weight: 600;
   color: #5b21b6;
   background-color: white;
-}
-
-.inline-edit:focus {
-  box-shadow: 0 0 0 3px rgba(123, 58, 237, 0.2);
+  padding: 4px 2px;
 }
 
 .circle-state {
@@ -429,6 +423,212 @@
 
 .element-delete-btn:active {
   transform: scale(0.95);
+}
+
+/* Connection Mode Styles */
+.element-item.active {
+  background-color: #7c3aed;
+  color: white;
+  border-color: #5b21b6;
+  box-shadow: 0 4px 16px rgba(123, 58, 237, 0.3);
+}
+
+.connection-mode-indicator {
+  font-size: 10px;
+  color: #10b981;
+  margin-left: auto;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.state-element.connection-start {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4) !important;
+}
+
+.state-element.hovering {
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.4) !important;
+  border-color: #22c55e !important;
+}
+
+.connection-indicator {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #7c3aed;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(123, 58, 237, 0.3);
+  z-index: 50;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.connection-indicator p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  max-width: 400px;
+  width: 90%;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-content h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  color: #5b21b6;
+  font-weight: 700;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid #e9d5ff;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto';
+}
+
+.modal-input:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(123, 58, 237, 0.1);
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.modal-buttons button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: white;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
+}
+
+.btn-danger:active {
+  transform: translateY(0);
+}
+
+/* Transition Info Item Styles */
+.info-item.info-connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.info-item.info-connection .info-text {
+  flex: 1;
+  font-size: 11px;
+}
+
+.btn-edit-transition,
+.btn-delete-transition {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  background: transparent;
+  color: #7c3aed;
+  flex-shrink: 0;
+}
+
+.btn-edit-transition:hover {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.btn-delete-transition {
+  color: #ef4444;
+}
+
+.btn-delete-transition:hover {
+  background: #fee2e2;
+  color: #dc2626;
 }
 
 /* Scrollbar styling */

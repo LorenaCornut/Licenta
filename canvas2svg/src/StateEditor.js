@@ -36,9 +36,11 @@ const StateEditor = () => {
   const [editName, setEditName] = useState('');
   const [movingElement, setMovingElement] = useState(null);
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
-  const [connectionMode, setConnectionMode] = useState(null);
+  const [connectionMode, setConnectionMode] = useState(false);
   const [connectionStart, setConnectionStart] = useState(null);
   const [hoveringConnectionElement, setHoveringConnectionElement] = useState(null);
+  const [editingConnection, setEditingConnection] = useState(null);
+  const [editConnectionLabel, setEditConnectionLabel] = useState('');
 
   // Load diagram if ID provided
   useEffect(() => {
@@ -130,6 +132,9 @@ const StateEditor = () => {
   // Download as SVG
   const downloadSVG = () => {
     let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" style="background-color: white;">\n';
+    
+    // Add marker definition
+    svg += '<defs><marker id="arrowhead" markerWidth="15" markerHeight="15" refX="12" refY="7.5" orient="auto"><polygon points="0 0, 15 7.5, 0 15" fill="#7c3aed" /></marker></defs>\n';
 
     // Draw connections
     connections.forEach(conn => {
@@ -139,41 +144,129 @@ const StateEditor = () => {
       if (!fromEl || !toEl) return;
 
       const fromX = fromEl.x + (fromEl.width || 100) / 2;
-      const fromY = fromEl.y + (fromEl.height || 80) / 2;
+      const fromY = fromEl.y + (fromEl.height || 100) / 2;
       const toX = toEl.x + (toEl.width || 100) / 2;
-      const toY = toEl.y + (toEl.height || 80) / 2;
-
-      svg += `<line x1='${fromX}' y1='${fromY}' x2='${toX}' y2='${toY}' stroke='#7c3aed' stroke-width='2' marker-end='url(#arrowhead)'/>\n`;
+      const toY = toEl.y + (toEl.height || 100) / 2;
       
-      if (conn.label) {
-        const midX = (fromX + toX) / 2;
-        const midY = (fromY + toY) / 2;
-        svg += `<text x='${midX}' y='${midY - 10}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#7c3aed' font-weight='600'>${escapeXML(conn.label)}</text>\n`;
+      // Calculate angle and direction
+      const dx = toX - fromX;
+      const dy = toY - fromY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+      const radiusStart = 41; // Start point on edge
+      const radiusEnd = 43; // End point adjusted for arrow on edge
+
+      // Self-loop case
+      if (fromEl.id === toEl.id) {
+        const elementWidth = fromEl.width || 100;
+        const elementHeight = fromEl.height || 100;
+        
+        const startX = fromX - elementWidth / 3;
+        const startY = fromY - (elementHeight / 2) - 20;
+        const endX = fromX + elementWidth / 3;
+        const endY = fromY - (elementHeight / 2) - 20;
+        
+        const arcRadius = Math.abs(endX - startX) / 1.5;
+        const textCenterX = fromX;
+        const textCenterY = startY + arcRadius + 15;
+        
+        svg += `<path d='M ${startX} ${startY} A ${arcRadius} ${arcRadius} 0 0 1 ${endX} ${endY}' stroke='#7c3aed' stroke-width='2' fill='none' marker-end='url(#arrowhead)'/>\n`;
+        if (conn.label) {
+          svg += `<text x='${textCenterX}' y='${textCenterY}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#7c3aed' font-weight='600'>${escapeXML(conn.label)}</text>\n`;
+        }
+      } else {
+        // Calculate points on circumference
+        const lineStartX = fromX + radiusStart * Math.cos(angle);
+        const lineStartY = fromY + radiusStart * Math.sin(angle);
+        const lineEndX = toX - radiusEnd * Math.cos(angle);
+        const lineEndY = toY - radiusEnd * Math.sin(angle);
+        
+        // Check for bidirectional connection
+        const reverseConn = connections.find(c => 
+          c.fromId === toEl.id && c.toId === fromEl.id
+        );
+        const isBidirectional = !!reverseConn;
+        
+        let pathD;
+        let labelX = (lineStartX + lineEndX) / 2;
+        let labelY = (lineStartY + lineEndY) / 2 + 15;
+        
+        if (isBidirectional) {
+          // Bezier curve - same logic as editor
+          let perpX = -Math.sin(angle);
+          let perpY = Math.cos(angle);
+          
+          // If backward connection, invert perpendicular
+          if (conn.fromId > conn.toId) {
+            perpX = -perpX;
+            perpY = -perpY;
+          }
+          
+          // Midpoint at 50% of line
+          const midX = (lineStartX + lineEndX) / 2;
+          const midY = (lineStartY + lineEndY) / 2;
+          
+          // Control point offset
+          const controlOffset = 60;
+          
+          // S1→S2: offsetFactor = -1 (pull down)
+          // S2→S1: offsetFactor = 1 (pull up)
+          const offsetFactor = conn.fromId < conn.toId ? -1 : 1;
+          
+          const controlX = midX + perpX * controlOffset * offsetFactor;
+          const controlY = midY + perpY * controlOffset * offsetFactor;
+          
+          // Quadratic Bezier curve
+          pathD = `M ${lineStartX} ${lineStartY} Q ${controlX} ${controlY} ${lineEndX} ${lineEndY}`;
+          
+          // Label positioning
+          labelX = controlX;
+          if (conn.fromId < conn.toId) {
+            labelY = controlY + 20;
+          } else {
+            labelY = controlY - 20;
+          }
+        } else {
+          // Straight line
+          pathD = `M ${lineStartX} ${lineStartY} L ${lineEndX} ${lineEndY}`;
+        }
+        
+        svg += `<path d='${pathD}' stroke='#7c3aed' stroke-width='2' fill='none' marker-end='url(#arrowhead)'/>\n`;
+        
+        if (conn.label) {
+          svg += `<text x='${labelX}' y='${labelY}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#7c3aed' font-weight='600'>${escapeXML(conn.label)}</text>\n`;
+        }
       }
     });
 
     // Draw elements
     elements.forEach(el => {
       const w = el.width || 100;
-      const h = el.height || 80;
+      const h = el.height || 100;
       const x = el.x;
       const y = el.y;
 
       if (el.type === 'STATE') {
-        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='#f3e8ff' stroke='#a78bfa' stroke-width='2' rx='12'/>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 6}' font-size='14' font-family='Arial, sans-serif' text-anchor='middle' fill='#5b21b6' font-weight='600'>${escapeXML(el.name)}</text>\n`;
+        const radius = Math.min(w, h) / 2 - 3;
+        svg += `<circle cx='${x + w / 2}' cy='${y + h / 2}' r='${radius}' fill='#f3e8ff' stroke='#7c3aed' stroke-width='2'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='14' font-family='Arial, sans-serif' text-anchor='middle' fill='#5b21b6' font-weight='600'>${escapeXML(el.name)}</text>\n`;
       } else if (el.type === 'INITIAL') {
         const radius = Math.min(w, h) / 2 - 3;
         svg += `<circle cx='${x + w / 2}' cy='${y + h / 2}' r='${radius}' fill='#5b21b6' stroke='#5b21b6' stroke-width='2'/>\n`;
+        if (el.name) {
+          svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#ffffff' font-weight='600'>${escapeXML(el.name)}</text>\n`;
+        }
       } else if (el.type === 'FINAL') {
         const outerRadius = Math.min(w, h) / 2 - 2;
         const innerRadius = outerRadius * 0.55;
         svg += `<circle cx='${x + w / 2}' cy='${y + h / 2}' r='${outerRadius}' fill='none' stroke='#5b21b6' stroke-width='3'/>\n`;
         svg += `<circle cx='${x + w / 2}' cy='${y + h / 2}' r='${innerRadius}' fill='#5b21b6' stroke='#5b21b6' stroke-width='1'/>\n`;
+        if (el.name) {
+          svg += `<text x='${x + w / 2}' y='${y + h / 2 + 5}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#ffffff' font-weight='600'>${escapeXML(el.name)}</text>\n`;
+        }
       }
     });
 
-    svg += `<defs><marker id='arrowhead' markerWidth='10' markerHeight='10' refX='9' refY='3' orient='auto'><polygon points='0 0, 10 3, 0 6' fill='#7c3aed' /></marker></defs>\n`;
     svg += `</svg>`;
 
     const blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -206,7 +299,7 @@ const StateEditor = () => {
       x: Math.max(0, x),
       y: Math.max(0, y),
       width: 100,
-      height: 80
+      height: 100
     };
 
     setElements([...elements, newElement]);
@@ -221,17 +314,43 @@ const StateEditor = () => {
     if (connectionMode) {
       if (!connectionStart) {
         setConnectionStart({ elementId: el.id });
+        setSelectedElement(el.id);
       } else if (connectionStart.elementId !== el.id) {
-        const newConnection = {
-          id: Date.now().toString(),
-          fromId: connectionStart.elementId,
-          toId: el.id,
-          label: 'Transition',
-          type: 'TRANSITION'
-        };
-        setConnections([...connections, newConnection]);
+        // Check if connection already exists
+        const existingConnection = connections.find(
+          c => c.fromId === connectionStart.elementId && c.toId === el.id
+        );
+        
+        if (!existingConnection) {
+          const newConnection = {
+            id: Date.now().toString(),
+            fromId: connectionStart.elementId,
+            toId: el.id,
+            label: 'ε',
+            type: 'TRANSITION'
+          };
+          setConnections([...connections, newConnection]);
+        }
         setConnectionStart(null);
-        setConnectionMode(null);
+        setConnectionMode(false);
+      } else {
+        // Self-loop (same element)
+        const existingConnection = connections.find(
+          c => c.fromId === el.id && c.toId === el.id
+        );
+        
+        if (!existingConnection) {
+          const newConnection = {
+            id: Date.now().toString(),
+            fromId: el.id,
+            toId: el.id,
+            label: 'ε',
+            type: 'TRANSITION'
+          };
+          setConnections([...connections, newConnection]);
+        }
+        setConnectionStart(null);
+        setConnectionMode(false);
       }
     } else {
       setSelectedElement(el.id);
@@ -241,9 +360,8 @@ const StateEditor = () => {
   // Handle element double-click for editing
   const handleElementDoubleClick = (e, el) => {
     e.stopPropagation();
-    if (el.type === 'INITIAL' || el.type === 'FINAL') return;
     setEditingElement(el.id);
-    setEditName(el.name);
+    setEditName(el.name || '');
   };
 
   // Handle element delete
@@ -251,6 +369,23 @@ const StateEditor = () => {
     setElements(elements.filter(el => el.id !== elementId));
     setConnections(connections.filter(conn => conn.fromId !== elementId && conn.toId !== elementId));
     setSelectedElement(null);
+  };
+
+  // Handle delete connection
+  const handleDeleteConnection = (connectionId) => {
+    setConnections(connections.filter(conn => conn.id !== connectionId));
+    setEditingConnection(null);
+  };
+
+  // Handle save connection label
+  const handleSaveConnectionLabel = () => {
+    if (editingConnection && editConnectionLabel.trim()) {
+      setConnections(connections.map(conn =>
+        conn.id === editingConnection ? { ...conn, label: editConnectionLabel } : conn
+      ));
+      setEditingConnection(null);
+      setEditConnectionLabel('');
+    }
   };
 
   // Handle element drag
@@ -292,7 +427,7 @@ const StateEditor = () => {
     
     for (const el of elements) {
       if (el.id === elementId) continue;
-      const elRect = { x: el.x, y: el.y, width: el.width || 100, height: el.height || 80 };
+      const elRect = { x: el.x, y: el.y, width: el.width || 100, height: el.height || 100 };
       if (checkCollision(movingRect, elRect)) {
         return true;
       }
@@ -313,7 +448,7 @@ const StateEditor = () => {
       if (!currentEl || (currentEl.x === newX && currentEl.y === newY)) return; // Skip if no change
       
       const elWidth = currentEl.width || 100;
-      const elHeight = currentEl.height || 80;
+      const elHeight = currentEl.height || 100;
       
       // Check for collision with other elements
       if (hasCollisionWithOthers(movingElement, newX, newY, elWidth, elHeight)) {
@@ -398,13 +533,19 @@ const StateEditor = () => {
           {Object.entries(STATE_ELEMENTS).map(([key, value]) => (
             <div
               key={key}
-              className={`element-item ${!value.isConnection ? 'draggable' : ''}`}
+              className={`element-item ${!value.isConnection ? 'draggable' : ''} ${key === 'TRANSITION' && connectionMode ? 'active' : ''}`}
               draggable={!value.isConnection}
               onDragStart={(e) => handleDragStart(e, key)}
-              onClick={() => value.isConnection && setConnectionMode(value.isConnection ? key : null)}
+              onClick={() => {
+                if (value.isConnection) {
+                  setConnectionMode(!connectionMode);
+                  setConnectionStart(null);
+                }
+              }}
             >
               <span className="element-icon">{value.icon}</span>
               <span className="element-label">{value.label}</span>
+              {key === 'TRANSITION' && connectionMode && <span className="connection-mode-indicator">● Activ</span>}
             </div>
           ))}
         </div>
@@ -435,11 +576,32 @@ const StateEditor = () => {
               {connections.length === 0 ? (
                 <p className="info-empty">Adaugă tranzițiiί la diagramă</p>
               ) : (
-                connections.map(conn => (
-                  <div key={conn.id} className="info-item">
-                    <span className="info-text">{conn.label || 'ε'}</span>
-                  </div>
-                ))
+                connections.map(conn => {
+                  const fromEl = elements.find(e => e.id === conn.fromId);
+                  const toEl = elements.find(e => e.id === conn.toId);
+                  return (
+                    <div key={conn.id} className="info-item info-connection">
+                      <span className="info-text">
+                        {fromEl?.name || 'Unknown'} → {toEl?.name || 'Unknown'}: <strong>{conn.label}</strong>
+                      </span>
+                      <button 
+                        className="btn-edit-transition"
+                        onClick={() => {
+                          setEditingConnection(conn.id);
+                          setEditConnectionLabel(conn.label);
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button 
+                        className="btn-delete-transition"
+                        onClick={() => handleDeleteConnection(conn.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -453,14 +615,15 @@ const StateEditor = () => {
         onDrop={handleCanvasDrop}
         onClick={() => {
           setSelectedElement(null);
-          setConnectionMode(null);
+          setConnectionMode(false);
           setConnectionStart(null);
         }}
+        style={{ cursor: connectionMode ? 'crosshair' : 'default' }}
       >
         <svg style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', width: '100%', height: '100%' }}>
           <defs>
-            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-              <polygon points="0 0, 10 3, 0 6" fill="#7c3aed" />
+            <marker id="arrowhead" markerWidth="15" markerHeight="15" refX="12" refY="7.5" orient="auto">
+              <polygon points="0 0, 15 7.5, 0 15" fill="#7c3aed" />
             </marker>
           </defs>
           
@@ -471,18 +634,141 @@ const StateEditor = () => {
             if (!fromEl || !toEl) return null;
 
             const fromX = fromEl.x + (fromEl.width || 100) / 2;
-            const fromY = fromEl.y + (fromEl.height || 80) / 2;
+            const fromY = fromEl.y + (fromEl.height || 100) / 2;
             const toX = toEl.x + (toEl.width || 100) / 2;
-            const toY = toEl.y + (toEl.height || 80) / 2;
+            const toY = toEl.y + (toEl.height || 100) / 2;
 
-            return (
-              <g key={conn.id}>
-                <line x1={fromX} y1={fromY} x2={toX} y2={toY} stroke="#7c3aed" strokeWidth="2" markerEnd="url(#arrowhead)" />
-                {conn.label && (
-                  <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 10} fontSize="12" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#7c3aed" fontWeight="600">
+            // Self-loop case
+            if (fromEl.id === toEl.id) {
+              const elementWidth = fromEl.width || 100;
+              const elementHeight = fromEl.height || 100;
+              
+              // Arcul se face deasupra stării
+              const startX = fromX - elementWidth / 3;
+              const startY = fromY - (elementHeight / 2) - 20;
+              const endX = fromX + elementWidth / 3;
+              const endY = fromY - (elementHeight / 2) - 20;
+              
+              const arcRadius = Math.abs(endX - startX) / 1.5;
+              const textCenterX = fromX;
+              const textCenterY = startY + arcRadius + 15;
+              
+              return (
+                <g 
+                  key={conn.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setEditingConnection(conn.id);
+                    setEditConnectionLabel(conn.label);
+                  }}
+                >
+                  <path
+                    d={`M ${startX} ${startY} A ${arcRadius} ${arcRadius} 0 0 1 ${endX} ${endY}`}
+                    stroke="#7c3aed"
+                    strokeWidth="2"
+                    fill="none"
+                    markerEnd="url(#arrowhead)"
+                  />
+                  <text 
+                    x={textCenterX} 
+                    y={textCenterY} 
+                    fontSize="12" 
+                    fontFamily="Arial, sans-serif" 
+                    textAnchor="middle" 
+                    fill="#7c3aed" 
+                    fontWeight="600" 
+                    pointerEvents="auto"
+                  >
                     {conn.label}
                   </text>
-                )}
+                </g>
+              );
+            }
+
+            // Normal connection
+            const dx = toX - fromX;
+            const dy = toY - fromY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx);
+            
+            // Radius of circle (from SVG r="40")
+            const radiusStart = 41; // Start point on edge
+            const radiusEnd = 43; // End point adjusted for arrow on edge
+            
+            // Calculate start point on circumference
+            const startX = fromX + radiusStart * Math.cos(angle);
+            const startY = fromY + radiusStart * Math.sin(angle);
+            
+            // Calculate end point on circumference
+            const endX = toX - radiusEnd * Math.cos(angle);
+            const endY = toY - radiusEnd * Math.sin(angle);
+            
+            // Check if there's a reverse connection (bidirectional)
+            const reverseConn = connections.find(c => 
+              c.fromId === toEl.id && c.toId === fromEl.id
+            );
+            const isBidirectional = !!reverseConn;
+            
+            // Determine path: straight if single direction, curve if bidirectional
+            let pathD;
+            let labelX = (startX + endX) / 2;
+            let labelY = (startY + endY) / 2 + 15;
+            
+            if (isBidirectional) {
+              // Bezier curve - pull in opposite directions
+              let perpX = -Math.sin(angle);
+              let perpY = Math.cos(angle);
+              
+              // If this is a "backward" connection (fromId > toId), invert the perpendicular
+              if (conn.fromId > conn.toId) {
+                perpX = -perpX;
+                perpY = -perpY;
+              }
+              
+              // Midpoint at 50% of line
+              const midX = (startX + endX) / 2;
+              const midY = (startY + endY) / 2;
+              
+              // Control point offset
+              const controlOffset = 60;
+              
+              // S1→S2: offsetFactor = -1 (pull in -perpendicular direction)
+              // S2→S1: offsetFactor = 1 (pull in +perpendicular direction)
+              const offsetFactor = conn.fromId < conn.toId ? -1 : 1;
+              
+              const controlX = midX + perpX * controlOffset * offsetFactor;
+              const controlY = midY + perpY * controlOffset * offsetFactor;
+              
+              // Quadratic Bezier curve
+              pathD = `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
+              
+              // Label positioning - above or below control point based on direction
+              labelX = controlX;
+              if (conn.fromId < conn.toId) {
+                // S1→S2: label BELOW control point
+                labelY = controlY + 20;
+              } else {
+                // S2→S1: label ABOVE control point
+                labelY = controlY - 20;
+              }
+            } else {
+              // Straight line (single direction, no reverse)
+              pathD = `M ${startX} ${startY} L ${endX} ${endY}`;
+            }
+            
+            return (
+              <g 
+                key={conn.id}
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  setEditingConnection(conn.id);
+                  setEditConnectionLabel(conn.label);
+                }}
+              >
+                <path d={pathD} stroke="#7c3aed" strokeWidth="2" fill="none" markerEnd="url(#arrowhead)" />
+                <text x={labelX} y={labelY} fontSize="12" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#7c3aed" fontWeight="600" pointerEvents="auto">
+                  {conn.label}
+                </text>
               </g>
             );
           })}
@@ -493,7 +779,7 @@ const StateEditor = () => {
           <div
             key={el.id}
             data-element-id={el.id}
-            className={`state-element ${el.type} ${selectedElement === el.id ? 'selected' : ''} ${editingElement === el.id ? 'editing' : ''}`}
+            className={`state-element ${el.type} ${selectedElement === el.id ? 'selected' : ''} ${editingElement === el.id ? 'editing' : ''} ${connectionMode && connectionStart?.elementId === el.id ? 'connection-start' : ''} ${connectionMode && hoveringConnectionElement === el.id ? 'hovering' : ''}`}
             style={{
               left: `${el.x}px`,
               top: `${el.y}px`,
@@ -507,37 +793,114 @@ const StateEditor = () => {
             onMouseLeave={() => setHoveringConnectionElement(null)}
           >
             {el.type === 'STATE' ? (
-              <>
-                {editingElement === el.id ? (
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveName();
-                      if (e.key === 'Escape') setEditingElement(null);
-                    }}
-                    onBlur={handleSaveName}
-                    autoFocus
-                    className="inline-edit"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <div className="state-name">{el.name}</div>
-                )}
-              </>
-            ) : el.type === 'INITIAL' ? (
               <svg viewBox="0 0 100 100" className="circle-state">
+                <circle cx="50" cy="50" r="40" fill="#f3e8ff" stroke="#7c3aed" strokeWidth="2" />
+                {editingElement === el.id ? (
+                  <foreignObject x="15" y="35" width="70" height="30">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveName();
+                        if (e.key === 'Escape') setEditingElement(null);
+                      }}
+                      onBlur={handleSaveName}
+                      autoFocus
+                      className="svg-inline-edit"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        textAlign: 'center',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: '#5b21b6',
+                        border: 'none',
+                        background: 'transparent'
+                      }}
+                    />
+                  </foreignObject>
+                ) : (
+                  <text x="50" y="55" fontSize="14" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#5b21b6" fontWeight="600">
+                    {el.name}
+                  </text>
+                )}
+              </svg>
+            ) : el.type === 'INITIAL' ? (
+              <svg viewBox="0 0 100 100" className="circle-state" onDoubleClick={(e) => handleElementDoubleClick(e, el)}>
                 <circle cx="50" cy="50" r="40" fill="#5b21b6" stroke="#7c3aed" strokeWidth="2" />
+                {editingElement === el.id ? (
+                  <foreignObject x="10" y="30" width="80" height="40">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveName();
+                        if (e.key === 'Escape') setEditingElement(null);
+                      }}
+                      onBlur={handleSaveName}
+                      autoFocus
+                      className="svg-inline-edit"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        textAlign: 'center',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#ffffff',
+                        border: 'none',
+                        background: 'transparent'
+                      }}
+                    />
+                  </foreignObject>
+                ) : (
+                  <text x="50" y="55" fontSize="12" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#ffffff" fontWeight="600">
+                    {el.name}
+                  </text>
+                )}
               </svg>
             ) : el.type === 'FINAL' ? (
-              <svg viewBox="0 0 100 100" className="circle-state">
+              <svg viewBox="0 0 100 100" className="circle-state" onDoubleClick={(e) => handleElementDoubleClick(e, el)}>
                 <circle cx="50" cy="50" r="40" fill="none" stroke="#7c3aed" strokeWidth="3" />
                 <circle cx="50" cy="50" r="24" fill="#5b21b6" stroke="#7c3aed" strokeWidth="1" />
+                {editingElement === el.id ? (
+                  <foreignObject x="10" y="30" width="80" height="40">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveName();
+                        if (e.key === 'Escape') setEditingElement(null);
+                      }}
+                      onBlur={handleSaveName}
+                      autoFocus
+                      className="svg-inline-edit"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        textAlign: 'center',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#ffffff',
+                        border: 'none',
+                        background: 'transparent'
+                      }}
+                    />
+                  </foreignObject>
+                ) : (
+                  <text x="50" y="55" fontSize="12" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#ffffff" fontWeight="600">
+                    {el.name}
+                  </text>
+                )}
               </svg>
             ) : null}
 
-            {selectedElement === el.id && (
+            {selectedElement === el.id && !connectionMode && (
               <button
                 className="element-delete-btn"
                 onClick={(e) => {
@@ -550,6 +913,41 @@ const StateEditor = () => {
             )}
           </div>
         ))}
+
+        {/* Edit Connection Label Modal */}
+        {editingConnection && (
+          <div className="modal-overlay" onClick={() => setEditingConnection(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h3>Editează eticheta tranzițiilor</h3>
+              <input
+                type="text"
+                value={editConnectionLabel}
+                onChange={(e) => setEditConnectionLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveConnectionLabel();
+                  if (e.key === 'Escape') setEditingConnection(null);
+                }}
+                autoFocus
+                className="modal-input"
+                placeholder="ε"
+              />
+              <div className="modal-buttons">
+                <button className="btn-primary" onClick={handleSaveConnectionLabel}>Salvează</button>
+                <button className="btn-secondary" onClick={() => setEditingConnection(null)}>Anulează</button>
+                <button className="btn-danger" onClick={() => {
+                  handleDeleteConnection(editingConnection);
+                }}>Șterge</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Connection mode indicator */}
+        {connectionMode && connectionStart && (
+          <div className="connection-indicator">
+            <p>Selectează starea de destinație...</p>
+          </div>
+        )}
       </div>
       </div>
     </div>
