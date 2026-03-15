@@ -41,6 +41,20 @@ const StateEditor = () => {
   const [hoveringConnectionElement, setHoveringConnectionElement] = useState(null);
   const [editingConnection, setEditingConnection] = useState(null);
   const [editConnectionLabel, setEditConnectionLabel] = useState('');
+  
+  // Save/Load states
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
+  const [diagramTitle, setDiagramTitle] = useState('');
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [shouldExitAfterSave, setShouldExitAfterSave] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  
+  // Track saved state for change detection
+  const [savedElementsState, setSavedElementsState] = useState(null);
+  const [savedConnectionsState, setSavedConnectionsState] = useState(null);
 
   // Load diagram if ID provided
   useEffect(() => {
@@ -52,44 +66,145 @@ const StateEditor = () => {
   // Load diagram from backend
   const loadDiagram = async (id) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/diagrams/${id}`);
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/diagrams/${id}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to load diagram: ${response.status}`);
+      }
+      
       const data = await response.json();
-      if (data.elements) setElements(JSON.parse(data.elements));
-      if (data.connections) setConnections(JSON.parse(data.connections));
+      
+      console.log('Loaded diagram:', data);
+      
+      // Set diagram title and ID
+      setCurrentDiagramId(id);
+      if (data.diagram?.title) {
+        setDiagramTitle(data.diagram.title);
+      }
+      
+      // Load elements and connections from backend response
+      if (data.elements && Array.isArray(data.elements)) {
+        console.log('Setting elements:', data.elements);
+        setElements(data.elements);
+        setSavedElementsState(JSON.stringify(data.elements));
+      }
+      
+      if (data.connections && Array.isArray(data.connections)) {
+        console.log('Setting connections:', data.connections);
+        setConnections(data.connections);
+        setSavedConnectionsState(JSON.stringify(data.connections));
+      }
     } catch (error) {
       console.error('Error loading diagram:', error);
+      alert('Eroare la încărcarea diagramei: ' + error.message);
     }
   };
 
-  // Save diagram
-  const saveDiagram = async () => {
-    const diagramData = {
-      type: 'STATE_DIAGRAM',
-      elements: JSON.stringify(elements),
-      connections: JSON.stringify(connections),
-      name: 'State Diagram'
-    };
+  // Check if there are unsaved changes
+  const hasUnsavedChanges = () => {
+    return JSON.stringify(elements) !== savedElementsState || 
+           JSON.stringify(connections) !== savedConnectionsState;
+  };
+
+  // Save diagram - show modal first
+  const handleSave = () => {
+    const userId = localStorage.getItem('userId');
+    if (!userId || userId === 'null' || userId === 'undefined') {
+      alert('Trebuie să te autentifici din nou pentru a salva diagrama!');
+      return;
+    }
+    
+    if (elements.length === 0) {
+      alert('Nu ai niciuna stare în diagramă. Adaugă cel puțin o stare înainte de a salva!');
+      return;
+    }
+    
+    setShowSaveModal(true);
+    setSaveError("");
+  };
+
+  // Confirm save - actually save to database
+  const confirmSave = async () => {
+    if (!diagramTitle.trim()) {
+      setSaveError('Te rog introdu un nume pentru diagramă!');
+      return;
+    }
+
+    const userId = localStorage.getItem('userId');
+    if (!userId || userId === 'null' || userId === 'undefined') {
+      setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError("");
 
     try {
-      const method = diagramId && diagramId !== 'new' ? 'PUT' : 'POST';
-      const url = diagramId && diagramId !== 'new' 
-        ? `http://localhost:5000/api/diagrams/${diagramId}`
-        : 'http://localhost:5000/api/diagrams';
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-      const response = await fetch(url, {
-        method,
+      // Transform to exact same structure as JSON export
+      const diagramData = {
+        elements: elements,
+        connections: connections
+      };
+
+      const response = await fetch(`${apiUrl}/api/diagrams/save`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(diagramData)
+        body: JSON.stringify({
+          userId: parseInt(userId),
+          title: diagramTitle.trim(),
+          tipDiagrama: 'Automat - Diagrama Stări',
+          nodes: elements.map(el => ({
+            id: el.id,
+            label: el.name || '',
+            x: el.x || 0,
+            y: el.y || 0,
+            type: el.type
+          })),
+          edges: connections.map(conn => ({
+            from: conn.fromId,
+            to: conn.toId,
+            label: conn.label || ''
+          })),
+          diagramData: diagramData,
+          diagramId: currentDiagramId
+        })
       });
 
-      const result = await response.json();
-      alert('Diagram saved successfully!');
-      if (method === 'POST') {
-        navigate(`/state/${result.id}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        setSaveError(data.message || 'Eroare la salvarea diagramei!');
+        setIsSaving(false);
+        return;
       }
-    } catch (error) {
-      console.error('Error saving diagram:', error);
-      alert('Failed to save diagram');
+
+      // Success!
+      setShowSaveModal(false);
+      setIsSaving(false);
+      // Update ID if it's a new diagram
+      if (data.diagramId && !currentDiagramId) {
+        setCurrentDiagramId(data.diagramId);
+      }
+      // Update saved state
+      setSavedElementsState(JSON.stringify(elements));
+      setSavedConnectionsState(JSON.stringify(connections));
+      
+      // Show success toast
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 5000);
+      
+      // If user pressed Back and then Save, navigate to dashboard
+      if (shouldExitAfterSave) {
+        setShouldExitAfterSave(false);
+        setTimeout(() => navigate('/dashboard'), 1500);
+      }
+
+    } catch (err) {
+      setSaveError('Eroare de rețea sau server!');
+      setIsSaving(false);
     }
   };
 
@@ -153,8 +268,18 @@ const StateEditor = () => {
       const dy = toY - fromY;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const angle = Math.atan2(dy, dx);
-      const radiusStart = 41; // Start point on edge
-      const radiusEnd = 43; // End point adjusted for arrow on edge
+      
+      // Calculate radius based on element size (same as React editor)
+      const fromW = fromEl.width || 100;
+      const fromH = fromEl.height || 100;
+      const toW = toEl.width || 100;
+      const toH = toEl.height || 100;
+      
+      const fromRadius = Math.min(fromW, fromH) / 2 - 3; // -3 for stroke
+      const toRadius = Math.min(toW, toH) / 2 - 3;
+      
+      const radiusStart = fromRadius + 2; // +2 to account for stroke width
+      const radiusEnd = toRadius + 2;
 
       // Self-loop case
       if (fromEl.id === toEl.id) {
@@ -498,12 +623,18 @@ const StateEditor = () => {
     <div className="state-editor-container">
       {/* Header */}
       <div className="state-editor-header">
-        <button className="btn-back" onClick={() => navigate('/dashboard')}>
+        <button className="btn-back" onClick={() => {
+          if (hasUnsavedChanges()) {
+            setShowExitModal(true);
+          } else {
+            navigate('/dashboard');
+          }
+        }}>
           ← Înapoi
         </button>
-        <h1>Automat State Diagram Editor</h1>
+        <h1>{currentDiagramId ? `Automat: ${diagramTitle}` : 'Automat State Diagram Editor'}</h1>
         <div className="header-actions">
-          <button className="btn-primary" onClick={saveDiagram}>Salvează</button>
+          <button className="btn-primary" onClick={handleSave}>Salvează</button>
           <div className="dropdown-save">
             <button className="btn-secondary">Exportă ▼</button>
             <div className="dropdown-content">
@@ -950,6 +1081,220 @@ const StateEditor = () => {
         )}
       </div>
       </div>
+
+      {/* Modal salvare cu nume */}
+      {showSaveModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}
+        onClick={() => setShowSaveModal(false)}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: '32px 40px',
+            minWidth: 350,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
+          }}
+          onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ 
+              margin: '0 0 20px 0', 
+              color: '#5b21b6',
+              fontSize: '1.4rem'
+            }}>Salvează diagrama</h3>
+            
+            <label style={{ 
+              display: 'block', 
+              marginBottom: 8, 
+              fontWeight: 600,
+              color: '#3c1a6e'
+            }}>
+              Nume diagramă:
+            </label>
+            <input
+              type="text"
+              value={diagramTitle}
+              onChange={(e) => setDiagramTitle(e.target.value)}
+              placeholder="Ex: Automatul meu"
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid #d1c4e9',
+                fontSize: '1rem',
+                marginBottom: 16,
+                boxSizing: 'border-box'
+              }}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmSave();
+                if (e.key === 'Escape') setShowSaveModal(false);
+              }}
+            />
+            
+            {saveError && (
+              <div style={{ 
+                color: '#b91c1c', 
+                marginBottom: 16,
+                fontSize: '0.95rem'
+              }}>
+                {saveError}
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowSaveModal(false);
+                  setSaveError("");
+                }}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 8,
+                  border: '1px solid #d1c4e9',
+                  background: '#fff',
+                  color: '#5b21b6',
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                Anulează
+              </button>
+              <button
+                onClick={confirmSave}
+                disabled={isSaving}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: isSaving ? '#c4b5fd' : '#7c3aed',
+                  color: '#fff',
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                {isSaving ? 'Se salvează...' : 'Salvează'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmare ieșire */}
+      {showExitModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}
+        onClick={() => setShowExitModal(false)}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: '40px',
+            minWidth: 350,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
+          }}
+          onClick={(e) => e.stopPropagation()}>
+            <svg
+              width="48"
+              height="48"
+              viewBox="0 0 48 48"
+              fill="none"
+              style={{ marginBottom: 16 }}
+            >
+              <path d="M24 14v12" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round"/>
+              <circle cx="24" cy="32" r="2" fill="#f59e0b"/>
+            </svg>
+            <h3 style={{ 
+              margin: '0 0 12px 0', 
+              color: '#5b21b6',
+              fontSize: '1.4rem'
+            }}>Doriți să salvați modificările?</h3>
+            <p style={{ 
+              color: '#6b7280', 
+              marginBottom: 24,
+              fontSize: '1rem'
+            }}>Ai modificări nesalvate. Ce dorești să faci?</p>
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  setShowExitModal(false);
+                  navigate('/dashboard');
+                }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  border: '1px solid #d1c4e9',
+                  background: '#fff',
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }}
+              >
+                Nu salva
+              </button>
+              <button
+                onClick={() => {
+                  setShowExitModal(false);
+                  setShouldExitAfterSave(true);
+                  handleSave();
+                }}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#7c3aed',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }}
+              >
+                Salvează
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast notificare salvare cu succes */}
+      {showSuccessToast && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: '#10b981',
+          color: '#fff',
+          padding: '20px 32px',
+          borderRadius: 12,
+          boxShadow: '0 4px 16px rgba(16,185,129,0.3)',
+          zIndex: 1001,
+          fontSize: '1.1rem',
+          fontWeight: 600,
+          animation: 'fadeInOut 5s ease-in-out forwards'
+        }}>
+          ✓ Diagrama a fost salvată cu succes!
+        </div>
+      )}
     </div>
   );
 };

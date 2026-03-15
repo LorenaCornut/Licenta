@@ -1,11 +1,36 @@
 const pool = require('../db');
 
-// Salvează o diagramă nouă sau actualizează una existentă
+// Salvează diagramă de automat (State Diagram) - inclusă în saveDiagram acum
+exports.saveStateDiagram = async (req, res) => {
+  // Redirect to saveDiagram
+  exports.saveDiagram(req, res);
+};
+
+// Salvează o diagramă nouă sau actualizează una existentă (Grafuri + State Diagrams)
 exports.saveDiagram = async (req, res) => {
-  const { userId, title, tipDiagrama, nodes, edges, diagramId } = req.body;
+  let { userId, title, tipDiagrama, nodes, edges, elements, connections, diagramData, diagramId } = req.body;
 
   try {
-    // Verifică dacă tipul de diagramă există, dacă nu îl creează
+    if (!userId || !title) {
+      return res.status(400).json({ message: 'Lipsa userId sau title!' });
+    }
+
+    // Extrage elements și connections din diagramData dacă sunt acolo (frontend state diagrams)
+    if (diagramData) {
+      if (diagramData.elements && !elements) elements = diagramData.elements;
+      if (diagramData.connections && !connections) connections = diagramData.connections;
+    }
+
+    console.log('Save request:', {
+      tipDiagrama,
+      hasNodes: !!nodes,
+      hasEdges: !!edges,
+      hasElements: !!elements,
+      hasConnections: !!connections,
+      hasDiagramData: !!diagramData
+    });
+
+    // Verifică dacă tipul de diagramă există
     let tipResult = await pool.query(
       'SELECT id_tip FROM tipuri_diagrame WHERE nume_tip = $1',
       [tipDiagrama]
@@ -22,38 +47,49 @@ exports.saveDiagram = async (req, res) => {
       idTip = tipResult.rows[0].id_tip;
     }
 
-    // Verifică dacă există componenta "Nod" pentru acest tip
+    // Determină dacă e state diagram sau graph
+    const isStateDiagram = tipDiagrama === 'Automat - Diagrama Stări' || elements || connections;
+    
+    // Folosește elements/connections dacă sunt disponibile, altfel nodes/edges
+    const finalNodes = elements || nodes || [];
+    const finalEdges = connections || edges || [];
+
+    // Componentă: pentru state diagrams folosim "Stare", pentru grafuri folosim "Nod"
+    const componentLabel = isStateDiagram ? 'Stare' : 'Nod';
+    
     let componentaResult = await pool.query(
       'SELECT id_componenta FROM componente_diagrame WHERE id_tip = $1 AND nume_componenta = $2',
-      [idTip, 'Nod']
+      [idTip, componentLabel]
     );
 
-    let idComponentaNod;
+    let idComponenta;
     if (componentaResult.rows.length === 0) {
       const insertComp = await pool.query(
         'INSERT INTO componente_diagrame (id_tip, nume_componenta, specificatii) VALUES ($1, $2, $3) RETURNING id_componenta',
-        [idTip, 'Nod', JSON.stringify({ radius: 28 })]
+        [idTip, componentLabel, JSON.stringify({ radius: 28 })]
       );
-      idComponentaNod = insertComp.rows[0].id_componenta;
+      idComponenta = insertComp.rows[0].id_componenta;
     } else {
-      idComponentaNod = componentaResult.rows[0].id_componenta;
+      idComponenta = componentaResult.rows[0].id_componenta;
     }
 
-    // Verifică dacă există legătura "Muchie" pentru acest tip
+    // Legătură: pentru state diagrams folosim "Tranziție", pentru grafuri folosim "Muchie"
+    const legaturaLabel = isStateDiagram ? 'Tranziție' : 'Muchie';
+    
     let legaturaResult = await pool.query(
       'SELECT id_legatura FROM legaturi_diagrame WHERE id_tip = $1 AND nume_legatura = $2',
-      [idTip, 'Muchie']
+      [idTip, legaturaLabel]
     );
 
-    let idLegaturaMuchie;
+    let idLegatura;
     if (legaturaResult.rows.length === 0) {
       const insertLeg = await pool.query(
         'INSERT INTO legaturi_diagrame (id_tip, nume_legatura, specificatii) VALUES ($1, $2, $3) RETURNING id_legatura',
-        [idTip, 'Muchie', JSON.stringify({ directed: tipDiagrama === 'Graf orientat' })]
+        [idTip, legaturaLabel, JSON.stringify({ directed: isStateDiagram || tipDiagrama === 'Graf orientat' })]
       );
-      idLegaturaMuchie = insertLeg.rows[0].id_legatura;
+      idLegatura = insertLeg.rows[0].id_legatura;
     } else {
-      idLegaturaMuchie = legaturaResult.rows[0].id_legatura;
+      idLegatura = legaturaResult.rows[0].id_legatura;
     }
 
     let idDiagrama;
@@ -66,7 +102,8 @@ exports.saveDiagram = async (req, res) => {
       );
       idDiagrama = diagramId;
 
-      // Șterge componentele și legăturile existente
+      // Șterge legăturile și componentele vechi
+      await pool.query('DELETE FROM legaturi_existente WHERE id_diagrama = $1', [idDiagrama]);
       await pool.query('DELETE FROM componente_existente WHERE id_diagrama = $1', [idDiagrama]);
     } else {
       // Creează o diagramă nouă
@@ -77,46 +114,60 @@ exports.saveDiagram = async (req, res) => {
       idDiagrama = diagramResult.rows[0].id_diagrama;
     }
 
-    // Salvează nodurile și păstrează maparea id local -> id_instanta din DB
+    // Salvează componentele (noduri/stări)
     const nodeIdMap = {};
-    for (const node of nodes) {
-      const nodeResult = await pool.query(
-        `INSERT INTO componente_existente 
-         (id_diagrama, id_componenta, continut, x, y, weight, height) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) 
-         RETURNING id_instanta`,
-        [
-          idDiagrama,
-          idComponentaNod,
-          JSON.stringify({ label: node.label, originalId: node.id }),
-          Math.round(node.x),
-          Math.round(node.y),
-          56,
-          56
-        ]
-      );
-      nodeIdMap[node.id] = nodeResult.rows[0].id_instanta;
-    }
-
-    // Salvează muchiile
-    for (const edge of edges) {
-      const idStart = nodeIdMap[edge.from];
-      const idEnd = nodeIdMap[edge.to];
-
-      if (idStart && idEnd) {
-        await pool.query(
-          `INSERT INTO legaturi_existente 
-           (id_diagrama, id_legatura, id_start, id_end, text, puncte_intermediare) 
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+    
+    if (finalNodes && Array.isArray(finalNodes)) {
+      for (const node of finalNodes) {
+        const nodeResult = await pool.query(
+          `INSERT INTO componente_existente 
+           (id_diagrama, id_componenta, continut, x, y, weight, height) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7) 
+           RETURNING id_instanta`,
           [
             idDiagrama,
-            idLegaturaMuchie,
-            idStart,
-            idEnd,
-            JSON.stringify({}),
-            JSON.stringify([])
+            idComponenta,
+            JSON.stringify({ 
+              label: node.name || node.label || '',
+              originalId: node.id,
+              type: node.type || 'STATE'
+            }),
+            Math.round(node.x || 0),
+            Math.round(node.y || 0),
+            node.width || 100,
+            node.height || 100
           ]
         );
+        nodeIdMap[node.id] = nodeResult.rows[0].id_instanta;
+      }
+    }
+
+    // Salvează legăturile (muchii/tranziții)
+    if (finalEdges && Array.isArray(finalEdges)) {
+      for (const edge of finalEdges) {
+        const startId = edge.fromId || edge.from;
+        const endId = edge.toId || edge.to;
+        const idStart = nodeIdMap[startId];
+        const idEnd = nodeIdMap[endId];
+
+        if (idStart && idEnd) {
+          const labelValue = (edge.label && edge.label.trim() !== '') ? edge.label.trim() : 'ε';
+          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}"`);
+          
+          await pool.query(
+            `INSERT INTO legaturi_existente 
+             (id_diagrama, id_legatura, id_start, id_end, text, puncte_intermediare) 
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              idDiagrama,
+              idLegatura,
+              idStart,
+              idEnd,
+              JSON.stringify({ label: labelValue }),
+              JSON.stringify([])
+            ]
+          );
+        }
       }
     }
 
@@ -171,40 +222,63 @@ exports.loadDiagram = async (req, res) => {
 
     const diagram = diagramResult.rows[0];
 
-    // Obține nodurile
-    const nodesResult = await pool.query(
-      `SELECT id_instanta, continut, x, y FROM componente_existente 
-       WHERE id_diagrama = $1`,
+    // Obține componentele (nodurile/stările)
+    const componentsResult = await pool.query(
+      `SELECT ce.id_instanta, ce.continut, ce.x, ce.y, ce.weight, ce.height
+       FROM componente_existente ce
+       WHERE ce.id_diagrama = $1
+       ORDER BY ce.id_instanta ASC`,
       [diagramId]
     );
 
-    const nodes = nodesResult.rows.map(row => ({
-      id: row.continut.originalId || row.continut.label || `node_${row.id_instanta}`,
-      label: row.continut.label || '',
-      x: row.x,
-      y: row.y,
-      dbId: row.id_instanta
-    }));
-
-    // Creează maparea id_instanta -> id local
-    const dbIdToLocalId = {};
-    nodesResult.rows.forEach(row => {
-      const localId = row.continut.originalId || row.continut.label || `node_${row.id_instanta}`;
-      dbIdToLocalId[row.id_instanta] = localId;
-    });
-
-    // Obține muchiile
-    const edgesResult = await pool.query(
-      `SELECT id_start, id_end, text FROM legaturi_existente 
-       WHERE id_diagrama = $1`,
+    // Obține legăturile (muchiile/tranziții)
+    const connectionsResult = await pool.query(
+      `SELECT le.id_instanta, le.id_start, le.id_end, le.text
+       FROM legaturi_existente le
+       WHERE le.id_diagrama = $1
+       ORDER BY le.id_instanta ASC`,
       [diagramId]
     );
 
-    const edges = edgesResult.rows.map(row => ({
-      from: dbIdToLocalId[row.id_start],
-      to: dbIdToLocalId[row.id_end]
-    }));
+    // Mapare: id_instanta din DB -> node object
+    const nodeMap = {};
+    const elements = [];
 
+    for (const component of componentsResult.rows) {
+      const continut = typeof component.continut === 'string' ? JSON.parse(component.continut) : component.continut;
+      const element = {
+        id: continut.originalId || `node-${component.id_instanta}`,
+        name: continut.label || '',
+        type: continut.type || 'STATE',
+        x: component.x,
+        y: component.y,
+        width: component.weight,
+        height: component.height,
+        db_id: component.id_instanta
+      };
+      nodeMap[component.id_instanta] = element;
+      elements.push(element);
+    }
+
+    // Construiește connections din legaturi_existente
+    const connections = [];
+    for (const connection of connectionsResult.rows) {
+      const text = typeof connection.text === 'string' ? JSON.parse(connection.text) : connection.text;
+      const startNode = nodeMap[connection.id_start];
+      const endNode = nodeMap[connection.id_end];
+
+      if (startNode && endNode) {
+        connections.push({
+          id: `conn-${connection.id_instanta}`,
+          fromId: startNode.id,
+          toId: endNode.id,
+          label: text.label || 'ε',
+          type: 'TRANSITION'
+        });
+      }
+    }
+
+    // Returnează în formatul așteptat de frontend
     return res.status(200).json({
       diagram: {
         id: diagram.id_diagrama,
@@ -213,8 +287,8 @@ exports.loadDiagram = async (req, res) => {
         createdAt: diagram.data_create,
         updatedAt: diagram.data_update
       },
-      nodes,
-      edges
+      elements: elements,
+      connections: connections
     });
 
   } catch (err) {

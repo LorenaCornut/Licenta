@@ -2,7 +2,10 @@ const express = require('express');
 const router = express.Router();
 const diagramController = require('../controllers/diagramController');
 
-// Salvează sau actualizează o diagramă
+// Salvează diagramă de automat (state diagram)
+router.post('/save-state', diagramController.saveStateDiagram);
+
+// Salvează sau actualizează o diagramă (grafuri)
 router.post('/save', diagramController.saveDiagram);
 
 // Obține toate diagramele unui utilizator
