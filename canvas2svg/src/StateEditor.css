@@ -148,7 +148,6 @@
 }
 
 .state-editor-sidebar {
-  width: 210px;
   background-color: white;
   color: #5b21b6;
   display: flex;
@@ -157,6 +156,41 @@
   box-shadow: 2px 0 12px rgba(91, 33, 182, 0.1);
   overflow-y: auto;
   border-right: 1px solid #e9d5ff;
+  flex-shrink: 0;
+  transition: width 0.3s ease, opacity 0.3s ease;
+}
+
+.sidebar-splitter {
+  width: 40px;
+  background: linear-gradient(90deg, #e9d5ff 0%, #ddd6fe 50%, #e9d5ff 100%);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border-left: 1px solid #e9d5ff;
+  border-right: 1px solid #e9d5ff;
+}
+
+.sidebar-splitter::after {
+  content: '⟨';
+  color: #7c3aed;
+  font-size: 20px;
+  font-weight: bold;
+  opacity: 0.7;
+  transition: all 0.3s ease;
+}
+
+.sidebar-splitter:hover {
+  background: linear-gradient(90deg, #ddd6fe 0%, #c4b5fd 50%, #ddd6fe 100%);
+}
+
+.sidebar-splitter:hover::after {
+  opacity: 1;
+  color: #5b21b6;
 }
 
 .sidebar-header {
@@ -690,6 +724,10 @@
     max-height: 180px;
     flex-direction: row;
     padding: 12px;
+  }
+
+  .sidebar-splitter {
+    display: none;
   }
 
   .sidebar-header {

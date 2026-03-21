@@ -55,6 +55,23 @@ const StateEditor = () => {
   // Track saved state for change detection
   const [savedElementsState, setSavedElementsState] = useState(null);
   const [savedConnectionsState, setSavedConnectionsState] = useState(null);
+  
+  // Sidebar toggle states
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(210);
+  const splitterRef = useRef(null);
+  const connectionClickTimers = useRef(new Map()); // Track click timers for each connection
+
+  // Toggle sidebar on splitter click
+  const toggleSidebar = () => {
+    if (sidebarExpanded) {
+      setSidebarWidth(0);
+      setSidebarExpanded(false);
+    } else {
+      setSidebarWidth(210);
+      setSidebarExpanded(true);
+    }
+  };
 
   // Load diagram if ID provided
   useEffect(() => {
@@ -236,7 +253,6 @@ const StateEditor = () => {
         const data = JSON.parse(e.target.result);
         if (data.elements && Array.isArray(data.elements)) setElements(data.elements);
         if (data.connections && Array.isArray(data.connections)) setConnections(data.connections);
-        alert('Diagramă importată cu succes!');
       } catch (err) {
         alert('Fișier invalid!');
       }
@@ -285,17 +301,26 @@ const StateEditor = () => {
       if (fromEl.id === toEl.id) {
         const elementWidth = fromEl.width || 100;
         const elementHeight = fromEl.height || 100;
+        const nodeRadius = elementWidth / 2;
+        const isBottomLoop = conn.loopDirection === 'bottom';
+        const directionMultiplier = isBottomLoop ? -1 : 1;
         
-        const startX = fromX - elementWidth / 3;
-        const startY = fromY - (elementHeight / 2) - 20;
-        const endX = fromX + elementWidth / 3;
-        const endY = fromY - (elementHeight / 2) - 20;
+        // Start and end points on the node's edge
+        const startX = fromX + nodeRadius * 0.6;
+        const startY = fromY - nodeRadius * 0.5 * directionMultiplier;
+        const endX = fromX - nodeRadius * 0.6;
+        const endY = fromY - nodeRadius * 0.5 * directionMultiplier;
         
-        const arcRadius = Math.abs(endX - startX) / 1.5;
+        // Control points for a nice arc (above or below the node)
+        const controlX1 = fromX + nodeRadius + 30;
+        const controlY1 = fromY - nodeRadius * directionMultiplier - 40 * directionMultiplier;
+        const controlX2 = fromX - nodeRadius - 30;
+        const controlY2 = fromY - nodeRadius * directionMultiplier - 40 * directionMultiplier;
+        
         const textCenterX = fromX;
-        const textCenterY = startY + arcRadius + 15;
+        const textCenterY = fromY - nodeRadius * directionMultiplier - 50 * directionMultiplier;
         
-        svg += `<path d='M ${startX} ${startY} A ${arcRadius} ${arcRadius} 0 0 1 ${endX} ${endY}' stroke='#7c3aed' stroke-width='2' fill='none' marker-end='url(#arrowhead)'/>\n`;
+        svg += `<path d='M ${startX} ${startY} C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${endX} ${endY}' stroke='#7c3aed' stroke-width='2' fill='none' marker-end='url(#arrowhead)'/>\n`;
         if (conn.label) {
           svg += `<text x='${textCenterX}' y='${textCenterY}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#7c3aed' font-weight='600'>${escapeXML(conn.label)}</text>\n`;
         }
@@ -470,7 +495,8 @@ const StateEditor = () => {
             fromId: el.id,
             toId: el.id,
             label: 'ε',
-            type: 'TRANSITION'
+            type: 'TRANSITION',
+            loopDirection: 'top'
           };
           setConnections([...connections, newConnection]);
         }
@@ -655,7 +681,7 @@ const StateEditor = () => {
 
       {/* Main content */}
       <div className="state-editor-main">
-      <div className="state-editor-sidebar">
+      <div className="state-editor-sidebar" style={{ width: `${sidebarWidth}px` }}>
         <div className="sidebar-header">
           <h2>Elemente</h2>
         </div>
@@ -739,6 +765,8 @@ const StateEditor = () => {
         </div>
       </div>
 
+      <div className="sidebar-splitter" ref={splitterRef} onClick={toggleSidebar} title={sidebarExpanded ? 'Ascunde panou' : 'Afișează panou'} />
+
       <div
         className="state-canvas"
         ref={canvasRef}
@@ -773,32 +801,81 @@ const StateEditor = () => {
             if (fromEl.id === toEl.id) {
               const elementWidth = fromEl.width || 100;
               const elementHeight = fromEl.height || 100;
+              const nodeRadius = elementWidth / 2;
+              const isBottomLoop = conn.loopDirection === 'bottom';
+              const directionMultiplier = isBottomLoop ? -1 : 1;
               
-              // Arcul se face deasupra stării
-              const startX = fromX - elementWidth / 3;
-              const startY = fromY - (elementHeight / 2) - 20;
-              const endX = fromX + elementWidth / 3;
-              const endY = fromY - (elementHeight / 2) - 20;
+              // Start and end points on the node's edge
+              const startX = fromX + nodeRadius * 0.6;
+              const startY = fromY - nodeRadius * 0.5 * directionMultiplier;
+              const endX = fromX - nodeRadius * 0.6;
+              const endY = fromY - nodeRadius * 0.5 * directionMultiplier;
               
-              const arcRadius = Math.abs(endX - startX) / 1.5;
+              // Control points for a nice arc (above or below the node)
+              const controlX1 = fromX + nodeRadius + 30;
+              const controlY1 = fromY - nodeRadius * directionMultiplier - 40 * directionMultiplier;
+              const controlX2 = fromX - nodeRadius - 30;
+              const controlY2 = fromY - nodeRadius * directionMultiplier - 40 * directionMultiplier;
+              
               const textCenterX = fromX;
-              const textCenterY = startY + arcRadius + 15;
+              const textCenterY = fromY - nodeRadius * directionMultiplier - 50 * directionMultiplier;
               
               return (
                 <g 
                   key={conn.id}
                   style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    setEditingConnection(conn.id);
-                    setEditConnectionLabel(conn.label);
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    // Clear any pending click timer
+                    if (connectionClickTimers.current.has(conn.id)) {
+                      clearTimeout(connectionClickTimers.current.get(conn.id));
+                      connectionClickTimers.current.delete(conn.id);
+                    }
+                    
+                    // Toggle loop direction on double-click
+                    const updatedConnections = connections.map(c => 
+                      c.id === conn.id 
+                        ? { ...c, loopDirection: c.loopDirection === 'bottom' ? 'top' : 'bottom' }
+                        : c
+                    );
+                    setConnections(updatedConnections);
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    
+                    // Clear any existing timer for this connection
+                    if (connectionClickTimers.current.has(conn.id)) {
+                      clearTimeout(connectionClickTimers.current.get(conn.id));
+                    }
+                    
+                    // Set a new timer for delayed single click
+                    const timer = setTimeout(() => {
+                      setEditingConnection(conn.id);
+                      setEditConnectionLabel(conn.label);
+                      connectionClickTimers.current.delete(conn.id);
+                    }, 250);
+                    
+                    connectionClickTimers.current.set(conn.id, timer);
                   }}
                 >
+                  {/* Invisible thick path for easier clicking */}
                   <path
-                    d={`M ${startX} ${startY} A ${arcRadius} ${arcRadius} 0 0 1 ${endX} ${endY}`}
+                    d={`M ${startX} ${startY} C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${endX} ${endY}`}
+                    stroke="transparent"
+                    strokeWidth="15"
+                    fill="none"
+                    pointerEvents="auto"
+                    style={{ cursor: 'pointer' }}
+                  />
+                  {/* Visible path */}
+                  <path
+                    d={`M ${startX} ${startY} C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${endX} ${endY}`}
                     stroke="#7c3aed"
                     strokeWidth="2"
                     fill="none"
                     markerEnd="url(#arrowhead)"
+                    pointerEvents="auto"
+                    style={{ cursor: 'pointer' }}
                   />
                   <text 
                     x={textCenterX} 
