@@ -152,7 +152,14 @@ exports.saveDiagram = async (req, res) => {
 
         if (idStart && idEnd) {
           const labelValue = (edge.label && edge.label.trim() !== '') ? edge.label.trim() : 'ε';
-          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}"`);
+          
+          // Save complete edge data including loopDirection
+          const textData = { label: labelValue };
+          if (edge.loopDirection) {
+            textData.loopDirection = edge.loopDirection;
+          }
+          
+          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}", loopDirection="${edge.loopDirection || 'undefined'}"`);
           
           await pool.query(
             `INSERT INTO legaturi_existente 
@@ -163,7 +170,7 @@ exports.saveDiagram = async (req, res) => {
               idLegatura,
               idStart,
               idEnd,
-              JSON.stringify({ label: labelValue }),
+              JSON.stringify(textData),
               JSON.stringify([])
             ]
           );
@@ -268,13 +275,20 @@ exports.loadDiagram = async (req, res) => {
       const endNode = nodeMap[connection.id_end];
 
       if (startNode && endNode) {
-        connections.push({
+        const connData = {
           id: `conn-${connection.id_instanta}`,
           fromId: startNode.id,
           toId: endNode.id,
           label: text.label || 'ε',
           type: 'TRANSITION'
-        });
+        };
+        
+        // Restore loopDirection if it was saved
+        if (text.loopDirection) {
+          connData.loopDirection = text.loopDirection;
+        }
+        
+        connections.push(connData);
       }
     }
 
