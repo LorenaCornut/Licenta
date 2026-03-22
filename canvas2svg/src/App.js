@@ -11,6 +11,7 @@ import GraphEditor from './GraphEditor';
 import OrientedGraphEditor from './OrientedGraphEditor';
 import UMLEditor from './UMLEditor';
 import StateEditor from './StateEditor';
+import PetriNetEditor from './PetriNetEditor';
 import Settings from './Settings';
 import './App.css';
 
@@ -37,6 +38,8 @@ function App() {
         <Route path="/uml/:diagramId" element={<UMLEditor />} />
         <Route path="/state" element={<StateEditor />} />
         <Route path="/state/:diagramId" element={<StateEditor />} />
+        <Route path="/petrinet" element={<PetriNetEditor />} />
+        <Route path="/petrinet/:diagramId" element={<PetriNetEditor />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
     </Router>

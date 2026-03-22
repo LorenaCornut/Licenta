@@ -120,6 +120,8 @@ function Dashboard() {
       navigate(`/orientedgraph/${diagram.id_diagrama}`);
     } else if (type.includes('uml')) {
       navigate(`/uml/${diagram.id_diagrama}`);
+    } else if (type.includes('petri')) {
+      navigate(`/petrinet/${diagram.id_diagrama}`);
     } else if (type.includes('state') || type.includes('automat')) {
       navigate(`/state/${diagram.id_diagrama}`);
     } else {
@@ -181,7 +183,7 @@ function Dashboard() {
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/orientedgraph'); }}>Graf orientat</button>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/graph'); }}>Graf neorientat</button>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/uml'); }}>UML</button>
-              <button className="create-menu-btn">Rețea Petri</button>
+              <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/petrinet'); }}>Rețea Petri</button>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/state'); }}>Automat</button>
             </div>
           )}
