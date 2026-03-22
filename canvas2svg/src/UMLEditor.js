@@ -1175,6 +1175,14 @@ const UMLEditor = () => {
     };
   }, [draggingEndpoint, elements]);
 
+  // Recalculate connection points whenever elements change position or size
+  useEffect(() => {
+    if (connections.length === 0 || elements.length === 0) return;
+    
+    const updateConnections = recalculateConnectionPoints(elements);
+    setConnections(updateConnections);
+  }, [elements]);
+
   // Handler pentru export JSON
   const handleSaveJSON = () => {
     const data = JSON.stringify({ selectedType, elements, connections }, null, 2);
@@ -1477,32 +1485,57 @@ const UMLEditor = () => {
     // Elemente UML (Class, Sequence, Use Case)
     elements.forEach(el => {
       const w = el.width || 150;
-      const h = el.height || 120;
+      let h = el.height || 120;
       const x = el.x;
       const y = el.y;
       
       if (el.type === 'CLASS' || el.type === 'INTERFACE') {
-        // Clase UML
-        // Box
+        // Clase UML - folosește el.height exact ca în editor
+        const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
+        
+        // Box - folosește dimensiunea reală din editor
         svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='6' fill='#fffef0' stroke='#8b4513' stroke-width='2'/>\n`;
+        
         // Header
-        svg += `<rect x='${x}' y='${y}' width='${w}' height='32' fill='#fff7e6' stroke='#8b4513' stroke-width='1'/>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + 22}' font-size='18' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        svg += `<rect x='${x}' y='${y}' width='${w}' height='${headerHeight}' fill='#fff7e6' stroke='#8b4513' stroke-width='1'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${y + headerHeight / 2 + 6}' font-size='14' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        
         // Linie sub header
-        svg += `<line x1='${x}' y1='${y + 32}' x2='${x + w}' y2='${y + 32}' stroke='#8b4513' stroke-width='1'/>\n`;
-        // Atribute
+        svg += `<line x1='${x}' y1='${y + headerHeight}' x2='${x + w}' y2='${y + headerHeight}' stroke='#8b4513' stroke-width='1'/>\n`;
+        
+        // Calculează spațiul disponibil pentru atribute și metode
+        const attrCount = el.attributes ? el.attributes.length : 0;
+        const methodCount = el.methods ? el.methods.length : 0;
+        const totalItems = attrCount + methodCount;
+        
+        // Spațiul disponibil după header
+        const availableHeight = h - headerHeight;
+        
+        // Distribuie spațiul: atributele ocupă proportional din spațiu
+        const attrSectionHeight = totalItems > 0 ? (availableHeight * attrCount) / totalItems : availableHeight / 2;
+        const methodSectionHeight = totalItems > 0 ? (availableHeight * methodCount) / totalItems : availableHeight / 2;
+        
+        // Atribute - distribuite pe înălțimea secțiunii
+        const attrSectionStart = y + headerHeight;
         if (el.attributes && el.attributes.length) {
+          const itemHeight = attrSectionHeight / attrCount;
           el.attributes.forEach((attr, i) => {
-            svg += `<text x='${x + 8}' y='${y + 52 + i * 18}' font-size='15' font-family='monospace' fill='#222'>${escapeXML(attr)}</text>\n`;
+            const textY = attrSectionStart + itemHeight * i + itemHeight / 2 + 4;
+            svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(attr)}</text>\n`;
           });
         }
+        
         // Linie sub atribute
-        const attrSectionHeight = 32 + (el.attributes ? el.attributes.length * 18 : 0);
-        svg += `<line x1='${x}' y1='${y + attrSectionHeight}' x2='${x + w}' y2='${y + attrSectionHeight}' stroke='#8b4513' stroke-width='1'/>\n`;
-        // Metode
+        const attrSeparatorY = attrSectionStart + attrSectionHeight;
+        svg += `<line x1='${x}' y1='${attrSeparatorY}' x2='${x + w}' y2='${attrSeparatorY}' stroke='#8b4513' stroke-width='1'/>\n`;
+        
+        // Metode - distribuite pe înălțimea secțiunii
+        const methodSectionStart = attrSeparatorY;
         if (el.methods && el.methods.length) {
+          const itemHeight = methodSectionHeight / methodCount;
           el.methods.forEach((m, i) => {
-            svg += `<text x='${x + 8}' y='${y + attrSectionHeight + 20 + i * 18}' font-size='15' font-family='monospace' fill='#222'>${escapeXML(m)}</text>\n`;
+            const textY = methodSectionStart + itemHeight * i + itemHeight / 2 + 4;
+            svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(m)}</text>\n`;
           });
         }
       } else if (el.type === 'ACTOR') {
@@ -1727,11 +1760,60 @@ const UMLEditor = () => {
   const getElementHeight = (el) => {
     if (el.type === 'CLASS' || el.type === 'INTERFACE') {
       const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
-      const attrHeight = Math.max(30, (el.attributes?.length || 0) * 20 + 12);
-      const methodHeight = Math.max(30, (el.methods?.length || 0) * 20 + 12);
-      return headerHeight + attrHeight + methodHeight;
+      const attrItemsHeight = Math.max(1, el.attributes?.length || 0) * 20;
+      const methodItemsHeight = Math.max(1, el.methods?.length || 0) * 20;
+      const separatorHeight = 2;
+      return el.height || (headerHeight + attrItemsHeight + separatorHeight + methodItemsHeight);
     }
     return el.height;
+  };
+
+  // Recalculează punctele de conexiune după ce elementele se schimbă
+  const recalculateConnectionPoints = (updatedElements) => {
+    return connections.map(conn => {
+      const fromEl = updatedElements.find(el => el.id === conn.from);
+      const toEl = updatedElements.find(el => el.id === conn.to);
+      
+      if (!fromEl || !toEl) return conn;
+      
+      // Recalculate cardinal points based on new element dimensions
+      const fromHeight = getElementHeight(fromEl);
+      const toHeight = getElementHeight(toEl);
+      
+      const fromCenterX = fromEl.x + fromEl.width / 2;
+      const fromCenterY = fromEl.y + fromHeight / 2;
+      const toCenterX = toEl.x + toEl.width / 2;
+      const toCenterY = toEl.y + toHeight / 2;
+      
+      const angle = Math.atan2(toCenterY - fromCenterY, toCenterX - fromCenterX);
+      
+      const getCardinalPoint = (element, elementHeight, calcAngle) => {
+        const centerX = element.x + element.width / 2;
+        const centerY = element.y + elementHeight / 2;
+        
+        let normalizedAngle = calcAngle;
+        if (normalizedAngle < 0) normalizedAngle += 2 * Math.PI;
+        
+        if (normalizedAngle < Math.PI / 4 || normalizedAngle >= 7 * Math.PI / 4) {
+          return { point: 'right', x: element.x + element.width, y: centerY };
+        } else if (normalizedAngle < 3 * Math.PI / 4) {
+          return { point: 'bottom', x: centerX, y: element.y + elementHeight };
+        } else if (normalizedAngle < 5 * Math.PI / 4) {
+          return { point: 'left', x: element.x, y: centerY };
+        } else {
+          return { point: 'top', x: centerX, y: element.y };
+        }
+      };
+      
+      const fromPoint = getCardinalPoint(fromEl, fromHeight, angle);
+      const toPoint = getCardinalPoint(toEl, toHeight, angle + Math.PI);
+      
+      return {
+        ...conn,
+        fromPoint: { x: fromPoint.x, y: fromPoint.y, point: fromPoint.point },
+        toPoint: { x: toPoint.x, y: toPoint.y, point: toPoint.point }
+      };
+    });
   };
 
   // Calculează punctele de conexiune pe baza coordonatelor REALE din DOM
@@ -2589,7 +2671,19 @@ const UMLEditor = () => {
                     </div>
                   </div>
                 ) : isClassType ? (
-                  <div className="uml-class-box">
+                  <div 
+                    className="uml-class-box" 
+                    style={{ 
+                      minHeight: el.height || (() => {
+                        const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
+                        const itemBaseHeight = 20;
+                        const attrItemsHeight = Math.max(1, el.attributes?.length || 0) * itemBaseHeight;
+                        const methodItemsHeight = Math.max(1, el.methods?.length || 0) * itemBaseHeight;
+                        const separatorHeight = 2;
+                        return headerHeight + attrItemsHeight + separatorHeight + methodItemsHeight;
+                      })()
+                    }}
+                  >
                     <div className="uml-class-header">
                       {el.type === 'INTERFACE' && <div className="uml-stereotype">«interface»</div>}
                       {editingElement === el.id ? (
@@ -2613,6 +2707,11 @@ const UMLEditor = () => {
                     {el.type === 'CLASS' && (
                       <div 
                         className="uml-class-section uml-attributes"
+                        style={{
+                          flex: ((el.attributes?.length || 0) + (el.methods?.length || 0) === 0) 
+                            ? 1 
+                            : Math.max(1, el.attributes?.length || 0)
+                        }}
                         onDoubleClick={(e) => handleAddAttribute(e, el.id)}
                       >
                         {(el.attributes || []).length === 0 ? (
@@ -2651,6 +2750,11 @@ const UMLEditor = () => {
                     )}
                     <div 
                       className="uml-class-section uml-methods"
+                      style={{
+                        flex: ((el.attributes?.length || 0) + (el.methods?.length || 0) === 0) 
+                          ? 1 
+                          : Math.max(1, el.methods?.length || 0)
+                      }}
                       onDoubleClick={(e) => handleAddMethod(e, el.id)}
                     >
                       {(el.methods || []).length === 0 ? (

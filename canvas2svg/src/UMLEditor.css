@@ -737,29 +737,37 @@
 }
 
 .uml-class-section {
-  padding: 6px 10px;
-  border-bottom: 1px solid #8b4513;
-  min-height: 24px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 0;
   background: #fffef0;
   cursor: pointer;
+}
+
+.uml-class-section.uml-attributes {
+  border-bottom: 2px solid #8b4513;
+}
+
+.uml-class-section.uml-methods {
+  border-bottom: none;
 }
 
 .uml-class-section:hover {
   background: #fff8dc;
 }
 
-.uml-class-section:last-child {
-  border-bottom: none;
-}
-
 .uml-member {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
   font-size: 12px;
   font-family: 'Consolas', 'Monaco', monospace;
   color: #333;
-  padding: 3px 4px;
+  padding: 8px 10px;
   text-align: left;
-  border-radius: 3px;
   cursor: text;
+  min-height: 0;
 }
 
 .uml-member:hover {
@@ -767,10 +775,11 @@
 }
 
 .uml-member-input {
+  flex: 1;
   width: 100%;
-  padding: 3px 4px;
+  padding: 8px 10px;
   border: 1px solid #8b4513;
-  border-radius: 3px;
+  border-radius: 0;
   font-size: 12px;
   font-family: 'Consolas', 'Monaco', monospace;
   color: #333;
@@ -780,14 +789,19 @@
 
 .uml-member-input:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.2);
+  box-shadow: inset 0 0 0 2px rgba(139, 69, 19, 0.3);
 }
 
 .uml-empty-hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 11px;
   color: #aaa;
   font-style: italic;
   text-align: center;
+  padding: 8px 10px;
 }
 
 /* ==================== PROPERTY PANEL SECTIONS ==================== */

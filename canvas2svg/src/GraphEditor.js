@@ -358,6 +358,8 @@ function GraphEditor() {
   const [showExitModal, setShowExitModal] = useState(false);
   const [shouldExitAfterSave, setShouldExitAfterSave] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [draggingControlPoint, setDraggingControlPoint] = useState(null); // {edgeIdx, pointIdx}
+  const [controlPointDragOffset, setControlPointDragOffset] = useState({ x: 0, y: 0 });
   const fileInputRef = React.useRef(null);
   const exportMenuRef = React.useRef(null);
 
@@ -541,6 +543,43 @@ function GraphEditor() {
     }
   }, [nodes]);
 
+  // Gestiune drag pentru control points pe muchii
+  React.useEffect(() => {
+    if (!draggingControlPoint) return;
+
+    const handleMouseMove = (e) => {
+      const rect = document.querySelector('.graph-canvas')?.getBoundingClientRect();
+      if (!rect) return;
+
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      setEdges(edges =>
+        edges.map((edge, edgeIdx) => {
+          if (edgeIdx !== draggingControlPoint.edgeIdx) return edge;
+          
+          const updatedPoints = [...(edge.controlPoints || [])];
+          updatedPoints[draggingControlPoint.pointIdx] = { x: mouseX, y: mouseY };
+          
+          return { ...edge, controlPoints: updatedPoints };
+        })
+      );
+    };
+
+    const handleMouseUp = () => {
+      setDraggingControlPoint(null);
+      setControlPointDragOffset({ x: 0, y: 0 });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingControlPoint]);
+
   function handleAssistantDraw() {
     setAssistantError("");
     // Ia nodurile și muchiile doar din textarea, ignoră orice altceva
@@ -627,7 +666,6 @@ function GraphEditor() {
         // Încarcă datele în editor
         setNodes(data.nodes);
         setEdges(data.edges);
-        alert('Graficul a fost importat cu succes!');
       } catch (error) {
         alert(`Eroare la parsare JSON: ${error.message}`);
       }
@@ -643,7 +681,6 @@ function GraphEditor() {
   // Exportă graficul în format JSON
   function handleExportJSON() {
     if (nodes.length === 0) {
-      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
       return;
     }
 
@@ -663,14 +700,11 @@ function GraphEditor() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-
-    alert('Graficul a fost exportat cu succes!');
   }
 
   // Exportă graficul în format SVG
   function handleExportSVG() {
     if (nodes.length === 0) {
-      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
       return;
     }
 
@@ -701,13 +735,21 @@ function GraphEditor() {
       
       if (!from || !to) return;
 
-      // Calculez pathul smooth
-      const pathD = buildSmoothedPath(
-        from.x, from.y,
-        to.x, to.y,
-        nodes,
-        [from.id, to.id]
-      );
+      // Calculez pathul smooth: DOAR controlPoints (dacă există), altfel auto-genereaza
+      let pathD;
+      if (edge.controlPoints && edge.controlPoints.length > 0) {
+        // Foloseștii control points pentru routing custom
+        const allPoints = [{ x: from.x, y: from.y }, ...edge.controlPoints, { x: to.x, y: to.y }];
+        pathD = pointsToSmoothPath(allPoints);
+      } else {
+        // Auto-genereaza path
+        pathD = buildSmoothedPath(
+          from.x, from.y,
+          to.x, to.y,
+          nodes,
+          [from.id, to.id]
+        );
+      }
 
       const path = document.createElementNS(svgNamespace, 'path');
       path.setAttribute('d', pathD);
@@ -772,8 +814,6 @@ function GraphEditor() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-
-    alert('Graficul a fost exportat cu succes!');
   }
 
   const [showDeleteEdge, setShowDeleteEdge] = useState({ edgeIdx: null, x: 0, y: 0 });
@@ -1438,13 +1478,19 @@ function GraphEditor() {
               const to = nodes.find(n => n.id === edge.to);
               if (!from || !to) return null;
 
-              // Construiesc path smooth care evită obstacolele
-              const pathD = buildSmoothedPath(
-                from.x, from.y,
-                to.x, to.y,
-                nodes,
-                [from.id, to.id]  // exclud nodurile capete
-              );
+              // Construiesc path: dacă are control points, folosesc alea; altfel auto-genereaza
+              let pathD;
+              if (edge.controlPoints && edge.controlPoints.length > 0) {
+                const allPoints = [{ x: from.x, y: from.y }, ...edge.controlPoints, { x: to.x, y: to.y }];
+                pathD = pointsToSmoothPath(allPoints);
+              } else {
+                pathD = buildSmoothedPath(
+                  from.x, from.y,
+                  to.x, to.y,
+                  nodes,
+                  [from.id, to.id]  // exclud nodurile capete
+                );
+              }
 
               return (
                 <React.Fragment key={`edge-${idx}`}>
@@ -1453,8 +1499,33 @@ function GraphEditor() {
                     stroke="#8b5cf6"
                     strokeWidth={3}
                     fill="none"
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'grab' }}
                     onContextMenu={e => handleEdgeContextMenu(edge, idx, e)}
+                    onMouseDown={(e) => {
+                      // Drag muchie - click și trag pentru a crea/muta control points
+                      if (!addEdgeMode) {
+                        e.stopPropagation();
+                        const rect = document.querySelector('.graph-canvas').getBoundingClientRect();
+                        const mouseX = e.clientX - rect.left;
+                        const mouseY = e.clientY - rect.top;
+                        
+                        // Crează un nou control point la poziția click-ului
+                        const newControlPoints = [...(edge.controlPoints || [])];
+                        newControlPoints.push({ x: mouseX, y: mouseY });
+                        
+                        setEdges(edges =>
+                          edges.map((ed, i) =>
+                            i === idx
+                              ? { ...ed, controlPoints: newControlPoints }
+                              : ed
+                          )
+                        );
+                        
+                        // Pornește drag pe acest punct
+                        setDraggingControlPoint({ edgeIdx: idx, pointIdx: newControlPoints.length - 1 });
+                        setControlPointDragOffset({ x: 0, y: 0 });
+                      }
+                    }}
                   />
                   {showDeleteEdge.edgeIdx === idx && (
                     <foreignObject x={showDeleteEdge.x} y={showDeleteEdge.y} width={32} height={32}>

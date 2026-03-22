@@ -153,13 +153,16 @@ exports.saveDiagram = async (req, res) => {
         if (idStart && idEnd) {
           const labelValue = (edge.label && edge.label.trim() !== '') ? edge.label.trim() : 'ε';
           
-          // Save complete edge data including loopDirection
+          // Save complete edge data including loopDirection and routing points
           const textData = { label: labelValue };
           if (edge.loopDirection) {
             textData.loopDirection = edge.loopDirection;
           }
           
-          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}", loopDirection="${edge.loopDirection || 'undefined'}"`);
+          // Salvează punctele de rută custom (controlPoints sau points)
+          const routingPoints = edge.controlPoints || edge.points || [];
+          
+          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}", loopDirection="${edge.loopDirection || 'undefined'}", routingPoints="${routingPoints.length}"`);
           
           await pool.query(
             `INSERT INTO legaturi_existente 
@@ -171,7 +174,7 @@ exports.saveDiagram = async (req, res) => {
               idStart,
               idEnd,
               JSON.stringify(textData),
-              JSON.stringify([])
+              JSON.stringify(routingPoints)
             ]
           );
         }
@@ -240,7 +243,7 @@ exports.loadDiagram = async (req, res) => {
 
     // Obține legăturile (muchiile/tranziții)
     const connectionsResult = await pool.query(
-      `SELECT le.id_instanta, le.id_start, le.id_end, le.text
+      `SELECT le.id_instanta, le.id_start, le.id_end, le.text, le.puncte_intermediare
        FROM legaturi_existente le
        WHERE le.id_diagrama = $1
        ORDER BY le.id_instanta ASC`,
@@ -271,6 +274,10 @@ exports.loadDiagram = async (req, res) => {
     const connections = [];
     for (const connection of connectionsResult.rows) {
       const text = typeof connection.text === 'string' ? JSON.parse(connection.text) : connection.text;
+      const routingPoints = connection.puncte_intermediare 
+        ? (typeof connection.puncte_intermediare === 'string' ? JSON.parse(connection.puncte_intermediare) : connection.puncte_intermediare)
+        : [];
+      
       const startNode = nodeMap[connection.id_start];
       const endNode = nodeMap[connection.id_end];
 
@@ -288,22 +295,66 @@ exports.loadDiagram = async (req, res) => {
           connData.loopDirection = text.loopDirection;
         }
         
+        // Restore routing points (controlPoints) if they were saved
+        if (routingPoints && routingPoints.length > 0) {
+          connData.controlPoints = routingPoints;
+        }
+        
         connections.push(connData);
       }
     }
 
     // Returnează în formatul așteptat de frontend
-    return res.status(200).json({
-      diagram: {
-        id: diagram.id_diagrama,
-        title: diagram.titlu,
-        type: diagram.nume_tip,
-        createdAt: diagram.data_create,
-        updatedAt: diagram.data_update
-      },
-      elements: elements,
-      connections: connections
-    });
+    // Pentru state diagrams: elements și connections
+    // Pentru graphs: nodes și edges (cu format compatibil)
+    const isGraphDiagram = diagram.nume_tip === 'Graf orientat' || diagram.nume_tip === 'Graf neorientat';
+    
+    if (isGraphDiagram) {
+      // Convertește elements/connections înapoi în nodes/edges pentru graph editors
+      const nodes = elements.map(el => ({
+        id: el.id,
+        label: el.name,
+        x: el.x,
+        y: el.y
+      }));
+      
+      const edges = connections.map(conn => {
+        const edge = {
+          from: conn.fromId,
+          to: conn.toId
+        };
+        // Re-add controlPoints if they exist
+        if (conn.controlPoints) {
+          edge.controlPoints = conn.controlPoints;
+        }
+        return edge;
+      });
+      
+      return res.status(200).json({
+        diagram: {
+          id: diagram.id_diagrama,
+          title: diagram.titlu,
+          type: diagram.nume_tip,
+          createdAt: diagram.data_create,
+          updatedAt: diagram.data_update
+        },
+        nodes: nodes,
+        edges: edges
+      });
+    } else {
+      // Pentru state diagrams, return elements și connections (original format)
+      return res.status(200).json({
+        diagram: {
+          id: diagram.id_diagrama,
+          title: diagram.titlu,
+          type: diagram.nume_tip,
+          createdAt: diagram.data_create,
+          updatedAt: diagram.data_update
+        },
+        elements: elements,
+        connections: connections
+      });
+    }
 
   } catch (err) {
     console.error('Eroare la încărcarea diagramei:', err);

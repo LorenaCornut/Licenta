@@ -306,22 +306,23 @@ function getArrowDirection(x1, y1, x2, y2, allNodes, excludeIds = []) {
 
 /**
  * Creează punctele unui triunghi pentru săgeață
- * Vârful e pe marginea nodului (pe cercul cu raza 28), nu în centru
+ * Vârful e pe marginea nodului, nu în centru
  */
-function createArrowhead(arrowX, arrowY, direction, size = 15) {
-  // Vârful săgeții e exact punctul pe marginea cercului dat (arrowX, arrowY)
+function createArrowhead(arrowX, arrowY, direction, size = 18) {
+  // Vârful săgeții e exact punctul pe marginea cercului
   const arrowTipX = arrowX;
   const arrowTipY = arrowY;
   
-  // Baza săgeții mai departe în spate
-  const arrowBaseX = arrowTipX - direction.x * 20;
-  const arrowBaseY = arrowTipY - direction.y * 20;
+  // Baza săgeții mai departe în spate (lungimea săgeții)
+  const arrowLength = 18;
+  const arrowBaseX = arrowTipX - direction.x * arrowLength;
+  const arrowBaseY = arrowTipY - direction.y * arrowLength;
   
-  // Perpendicular la direcție
+  // Perpendicular la direcție pentru lățimea săgeții
   const perpX = -direction.y;
   const perpY = direction.x;
   
-  // Triunghiul săgeții
+  // Triunghiul săgeții - trei puncte
   const p1 = `${arrowTipX},${arrowTipY}`;
   const p2 = `${arrowBaseX - perpX * size},${arrowBaseY - perpY * size}`;
   const p3 = `${arrowBaseX + perpX * size},${arrowBaseY + perpY * size}`;
@@ -359,6 +360,8 @@ function OrientedGraphEditor() {
   const [showExitModal, setShowExitModal] = useState(false);
   const [shouldExitAfterSave, setShouldExitAfterSave] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [draggingControlPoint, setDraggingControlPoint] = useState(null); // {edgeIdx, pointIdx}
+  const [controlPointDragOffset, setControlPointDragOffset] = useState({ x: 0, y: 0 });
   const fileInputRef = React.useRef(null);
   const exportMenuRef = React.useRef(null);
 
@@ -368,6 +371,43 @@ function OrientedGraphEditor() {
       loadDiagram(diagramId);
     }
   }, [diagramId]);
+
+  // Gestiune drag pentru control points pe muchii
+  React.useEffect(() => {
+    if (!draggingControlPoint) return;
+
+    const handleMouseMove = (e) => {
+      const rect = document.querySelector('.graph-canvas')?.getBoundingClientRect();
+      if (!rect) return;
+
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      setEdges(edges =>
+        edges.map((edge, edgeIdx) => {
+          if (edgeIdx !== draggingControlPoint.edgeIdx) return edge;
+          
+          const updatedPoints = [...(edge.controlPoints || [])];
+          updatedPoints[draggingControlPoint.pointIdx] = { x: mouseX, y: mouseY };
+          
+          return { ...edge, controlPoints: updatedPoints };
+        })
+      );
+    };
+
+    const handleMouseUp = () => {
+      setDraggingControlPoint(null);
+      setControlPointDragOffset({ x: 0, y: 0 });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingControlPoint]);
 
   // Funcție pentru a încărca o diagramă din baza de date
   async function loadDiagram(id) {
@@ -585,7 +625,6 @@ function OrientedGraphEditor() {
         // Încarcă datele în editor
         setNodes(data.nodes);
         setEdges(data.edges);
-        alert('Graficul orientat a fost importat cu succes!');
       } catch (error) {
         alert(`Eroare la parsare JSON: ${error.message}`);
       }
@@ -601,7 +640,6 @@ function OrientedGraphEditor() {
   // Exportă graficul în format JSON
   function handleExportJSON() {
     if (nodes.length === 0) {
-      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
       return;
     }
 
@@ -621,8 +659,6 @@ function OrientedGraphEditor() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-
-    alert('Graficul orientat a fost exportat cu succes!');
   }
 
   function handleAssistantDraw() {
@@ -731,8 +767,10 @@ function OrientedGraphEditor() {
     if (addEdgeMode) {
       if (edgeNodes.length === 0) {
         setEdgeNodes([nodeId]);
+        setEdgePreviewPoints([]);
       } else if (edgeNodes.length === 1 && edgeNodes[0] !== nodeId) {
-        setEdges([...edges, { from: edgeNodes[0], to: nodeId }]);
+        // Stochează preview points (nu sunt afișate în rendering)
+        setEdges([...edges, { from: edgeNodes[0], to: nodeId, points: edgePreviewPoints }]);
         
         const fromNode = nodes.find(n => n.id === edgeNodes[0]);
         const toNode = nodes.find(n => n.id === nodeId);
@@ -836,7 +874,6 @@ function OrientedGraphEditor() {
   // Exportă graficul orientat în format SVG cu săgeți
   function handleExportSVG() {
     if (nodes.length === 0) {
-      alert('Niciun nod nu a fost desenat. Adaugă cel puțin un nod înainte de export!');
       return;
     }
 
@@ -868,18 +905,43 @@ function OrientedGraphEditor() {
       // Calculez raza nodului destinație pentru săgeată
       const toRadius = getNodeRadius(to.label);
 
-      // Calculez pathul smooth cu informații despre săgeată
-      const pathResult = buildSmoothedPath(
-        from.x, from.y,
-        to.x, to.y,
-        nodes,
-        [from.id, to.id],
-        toRadius
-      );
-
-      const pathD = pathResult.path;
-      const direction = pathResult.direction;
-      const arrowPoint = pathResult.arrowPoint;
+      // Calculez pathul smooth: DOAR controlPoints (dacă există), altfel auto-genereaza
+      let pathD;
+      let direction = { x: 1, y: 0 };
+      let arrowPoint = { x: to.x, y: to.y };
+      
+      if (edge.controlPoints && edge.controlPoints.length > 0) {
+        const allPoints = [{ x: from.x, y: from.y }, ...edge.controlPoints, { x: to.x, y: to.y }];
+        pathD = pointsToSmoothPath(allPoints);
+        
+        const lastIdx = allPoints.length - 1;
+        const p1 = allPoints[lastIdx - 1];
+        const p2 = allPoints[lastIdx];
+        
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.hypot(dx, dy);
+        
+        if (dist > 0) {
+          direction = { x: dx / dist, y: dy / dist };
+        }
+        
+        arrowPoint = { 
+          x: p2.x - direction.x * toRadius, 
+          y: p2.y - direction.y * toRadius 
+        };
+      } else {
+        const result = buildSmoothedPath(
+          from.x, from.y,
+          to.x, to.y,
+          nodes,
+          [from.id, to.id],
+          toRadius
+        );
+        pathD = result.path;
+        direction = result.direction;
+        arrowPoint = result.arrowPoint;
+      }
 
       // Desenez linia muchiei
       const path = document.createElementNS(svgNamespace, 'path');
@@ -896,6 +958,8 @@ function OrientedGraphEditor() {
       const polygon = document.createElementNS(svgNamespace, 'polygon');
       polygon.setAttribute('points', arrowPoints);
       polygon.setAttribute('fill', '#8b5cf6');
+      polygon.setAttribute('stroke', '#6d28d9');
+      polygon.setAttribute('stroke-width', '0.5');
       svg.appendChild(polygon);
     });
 
@@ -952,8 +1016,6 @@ function OrientedGraphEditor() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-
-    alert('Graficul orientat a fost exportat cu succes!');
   }
 
   // Indicator de loading
@@ -1118,17 +1180,47 @@ function OrientedGraphEditor() {
               // Calculez raza nodului destinație pentru săgeată
               const toRadius = getNodeRadius(to.label);
 
-              const pathResult = buildSmoothedPath(
-                from.x, from.y,
-                to.x, to.y,
-                nodes,
-                [from.id, to.id],
-                toRadius
-              );
+              // Rendering: DOAR controlPoints (dacă există), altfel auto-genereaza
+              let pathD;
+              let direction = { x: 1, y: 0 };
+              let arrowPoint = { x: to.x, y: to.y };
               
-              const pathD = pathResult.path;
-              const direction = pathResult.direction;
-              const arrowPoint = pathResult.arrowPoint;
+              if (edge.controlPoints && edge.controlPoints.length > 0) {
+                // Foloseștii control points pentru routing custom
+                const allPoints = [{ x: from.x, y: from.y }, ...edge.controlPoints, { x: to.x, y: to.y }];
+                pathD = pointsToSmoothPath(allPoints);
+                
+                // Calculez direcție din ultimul segment
+                const lastIdx = allPoints.length - 1;
+                const p1 = allPoints[lastIdx - 1];
+                const p2 = allPoints[lastIdx];
+                
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const dist = Math.hypot(dx, dy);
+                
+                if (dist > 0) {
+                  direction = { x: dx / dist, y: dy / dist };
+                }
+                
+                arrowPoint = { 
+                  x: p2.x - direction.x * toRadius, 
+                  y: p2.y - direction.y * toRadius 
+                };
+              } else {
+                // Auto-genereaza path cu obstacle avoidance
+                const result = buildSmoothedPath(
+                  from.x, from.y,
+                  to.x, to.y,
+                  nodes,
+                  [from.id, to.id],
+                  toRadius
+                );
+                pathD = result.path;
+                direction = result.direction;
+                arrowPoint = result.arrowPoint;
+              }
+              
               const arrowPoints = createArrowhead(arrowPoint.x, arrowPoint.y, direction, 18);
 
               return (
@@ -1138,13 +1230,37 @@ function OrientedGraphEditor() {
                     stroke="#8b5cf6"
                     strokeWidth={3}
                     fill="none"
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'grab' }}
                     onContextMenu={e => handleEdgeContextMenu(edge, idx, e)}
+                    onMouseDown={(e) => {
+                      if (!addEdgeMode) {
+                        e.stopPropagation();
+                        const rect = document.querySelector('.graph-canvas').getBoundingClientRect();
+                        const mouseX = e.clientX - rect.left;
+                        const mouseY = e.clientY - rect.top;
+                        
+                        const newControlPoints = [...(edge.controlPoints || [])];
+                        newControlPoints.push({ x: mouseX, y: mouseY });
+                        
+                        setEdges(edges =>
+                          edges.map((ed, i) =>
+                            i === idx
+                              ? { ...ed, controlPoints: newControlPoints }
+                              : ed
+                          )
+                        );
+                        
+                        setDraggingControlPoint({ edgeIdx: idx, pointIdx: newControlPoints.length - 1 });
+                        setControlPointDragOffset({ x: 0, y: 0 });
+                      }
+                    }}
                   />
                   {/* Săgeată la capătul muchiei */}
                   <polygon
                     points={arrowPoints}
                     fill="#8b5cf6"
+                    stroke="#6d28d9"
+                    strokeWidth="0.5"
                     style={{ cursor: 'pointer' }}
                     onContextMenu={e => handleEdgeContextMenu(edge, idx, e)}
                   />
