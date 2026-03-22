@@ -5,20 +5,30 @@ import { useNavigate, useParams } from 'react-router-dom';
 // ============ HELPER FUNCTIONS ============
 
 /**
- * Calculează distanța de la un punct la un cerc
- */
-function distancePointToCircle(px, py, cx, cy, radius) {
-  const dist = Math.hypot(px - cx, py - cy);
-  return Math.max(0, dist - radius);
-}
-
-/**
  * Calculează distanța de la un punct la un dreptunghi
  */
 function distancePointToRect(px, py, x, y, width, height) {
   const closestX = Math.max(x, Math.min(px, x + width));
   const closestY = Math.max(y, Math.min(py, y + height));
   return Math.hypot(px - closestX, py - closestY);
+}
+
+/**
+ * Controlează coliziune între două AABB (dreptunghiuri)
+ */
+function checkCollisionAABB(rect1, rect2) {
+  return !(rect1.x + rect1.width <= rect2.x ||
+           rect2.x + rect2.width <= rect1.x ||
+           rect1.y + rect1.height <= rect2.y ||
+           rect2.y + rect2.height <= rect1.y);
+}
+
+/**
+ * Controlează coliziune între cerc și AABB
+ */
+function checkCollisionCircleRect(circleX, circleY, radius, rectX, rectY, rectWidth, rectHeight) {
+  const dist = distancePointToRect(circleX, circleY, rectX, rectY, rectWidth, rectHeight);
+  return dist < radius;
 }
 
 /**
@@ -73,17 +83,17 @@ function PetriNetEditor() {
   const [arcs, setArcs] = useState([]); // {id, from, to, label, controlPoints}
 
   // State pentru UI
-  const [tool, setTool] = useState('cursor'); // 'cursor', 'place', 'transition', 'arc', 'addTokens'
   const [selectedElement, setSelectedElement] = useState(null); // {type, id}
-  const [arcStart, setArcStart] = useState(null); // Pentru desenarea arcelor
+  const [arcConnectionMode, setArcConnectionMode] = useState(false); // Are locum arc connection
+  const [arcStart, setArcStart] = useState(null); // Start point for arc (alátag, transitions)
   const [arcPreviewPoints, setArcPreviewPoints] = useState([]);
-  const [edgePreviewPoints, setEdgePreviewPoints] = useState([]);
   const [draggingElement, setDraggingElement] = useState(null);
   const [draggingOffset, setDraggingOffset] = useState({ x: 0, y: 0 });
   const [draggingControlPoint, setDraggingControlPoint] = useState(null);
   const [editingLabel, setEditingLabel] = useState(null);
   const [diagramName, setDiagramName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [draggedTool, setDraggedTool] = useState(null); // Drag-and-drop tool
 
   // ============ SAVE HANDLER ============
 
@@ -135,6 +145,61 @@ function PetriNetEditor() {
   const TRANSITION_HEIGHT = 30;
   const TOKEN_RADIUS = 6;
 
+  // ============ COLLISION DETECTION ============
+
+  /**
+   * Controlează coliziune între două locuri (cercuri)
+   */
+  const checkPlaceCollision = (x1, y1, x2, y2, radius = PLACE_RADIUS) => {
+    const dist = Math.hypot(x1 - x2, y1 - y2);
+    return dist < radius * 2;
+  };
+
+  /**
+   * Controlează coliziune între două tranzitii (dreptunghiuri)
+   */
+  const checkTransitionCollision = (x1, y1, x2, y2, width = TRANSITION_WIDTH, height = TRANSITION_HEIGHT) => {
+    const rect1 = { x: x1 - width / 2, y: y1 - height / 2, width, height };
+    const rect2 = { x: x2 - width / 2, y: y2 - height / 2, width, height };
+    return checkCollisionAABB(rect1, rect2);
+  };
+
+  /**
+   * Controlează coliziune între loc și tranziție
+   */
+  const checkPlaceTransitionCollision = (placeX, placeY, transX, transY, placeRadius = PLACE_RADIUS, transWidth = TRANSITION_WIDTH, transHeight = TRANSITION_HEIGHT) => {
+    const rectX = transX - transWidth / 2;
+    const rectY = transY - transHeight / 2;
+    return checkCollisionCircleRect(placeX, placeY, placeRadius, rectX, rectY, transWidth, transHeight);
+  };
+
+  /**
+   * Controlează coliziune cu alte elemente (ExistENTE)
+   */
+  const hasCollisionWithOthers = (elementType, elementId, newX, newY) => {
+    // Controlează coliziune cu alte locuri
+    for (const place of places) {
+      if (place.id === elementId) continue;
+      if (elementType === 'place') {
+        if (checkPlaceCollision(newX, newY, place.x, place.y)) return true;
+      } else if (elementType === 'transition') {
+        if (checkPlaceTransitionCollision(place.x, place.y, newX, newY)) return true;
+      }
+    }
+
+    // Controlează coliziune cu tranzitii
+    for (const trans of transitions) {
+      if (trans.id === elementId) continue;
+      if (elementType === 'transition') {
+        if (checkTransitionCollision(newX, newY, trans.x, trans.y)) return true;
+      } else if (elementType === 'place') {
+        if (checkPlaceTransitionCollision(newX, newY, trans.x, trans.y)) return true;
+      }
+    }
+
+    return false;
+  };
+
   // ============ EVENT HANDLERS - CANVAS ============
 
   const handleCanvasMouseMove = (e) => {
@@ -143,18 +208,26 @@ function PetriNetEditor() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Handle dragging
-    if (draggingElement && tool === 'cursor') {
+    // Handle dragging existing elements
+    if (draggingElement) {
+      const newX = x - draggingOffset.x;
+      const newY = y - draggingOffset.y;
+
+      // Check for collision before allowing drag
+      if (hasCollisionWithOthers(draggingElement.type, draggingElement.id, newX, newY)) {
+        return; // Don't allow move if collision detected
+      }
+
       if (draggingElement.type === 'place') {
         setPlaces(places.map(p => 
           p.id === draggingElement.id 
-            ? { ...p, x: x - draggingOffset.x, y: y - draggingOffset.y }
+            ? { ...p, x: newX, y: newY }
             : p
         ));
       } else if (draggingElement.type === 'transition') {
         setTransitions(transitions.map(t =>
           t.id === draggingElement.id
-            ? { ...t, x: x - draggingOffset.x, y: y - draggingOffset.y }
+            ? { ...t, x: newX, y: newY }
             : t
         ));
       }
@@ -170,8 +243,8 @@ function PetriNetEditor() {
       }));
     }
 
-    // Arc preview
-    if (arcStart) {
+    // Arc preview when in connection mode
+    if (arcConnectionMode && arcStart) {
       const startX = arcStart.type === 'place' ? arcStart.element.x : arcStart.element.x;
       const startY = arcStart.type === 'place' ? arcStart.element.y : arcStart.element.y;
       setArcPreviewPoints([
@@ -182,93 +255,17 @@ function PetriNetEditor() {
   };
 
   const handleCanvasMouseDown = (e) => {
-    if (tool === 'cursor') {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-      // Check for place click
-      for (const place of places) {
-        if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
-          setSelectedElement({ type: 'place', id: place.id });
-          setDraggingElement({ type: 'place', id: place.id });
-          setDraggingOffset({ x: x - place.x, y: y - place.y });
-          return;
-        }
-      }
-
-      // Check for transition click
-      for (const trans of transitions) {
-        const dist = distancePointToRect(x, y, trans.x - TRANSITION_WIDTH / 2, trans.y - TRANSITION_HEIGHT / 2, TRANSITION_WIDTH, TRANSITION_HEIGHT);
-        if (dist <= 5) {
-          setSelectedElement({ type: 'transition', id: trans.id });
-          setDraggingElement({ type: 'transition', id: trans.id });
-          setDraggingOffset({ x: x - trans.x, y: y - trans.y });
-          return;
-        }
-      }
-
-      // Check for arc click
-      for (let arcIdx = 0; arcIdx < arcs.length; arcIdx++) {
-        const arc = arcs[arcIdx];
-        const fromObj = arc.from.type === 'place' ? places.find(p => p.id === arc.from.id) : transitions.find(t => t.id === arc.from.id);
-        const toObj = arc.to.type === 'place' ? places.find(p => p.id === arc.to.id) : transitions.find(t => t.id === arc.to.id);
-        
-        if (fromObj && toObj) {
-          const fromX = fromObj.x;
-          const fromY = fromObj.y;
-          const toX = toObj.x;
-          const toY = toObj.y;
-
-          // Check for control point click
-          if (arc.controlPoints && arc.controlPoints.length > 0) {
-            for (let ptIdx = 0; ptIdx < arc.controlPoints.length; ptIdx++) {
-              const pt = arc.controlPoints[ptIdx];
-              if (Math.hypot(x - pt.x, y - pt.y) <= 8) {
-                setDraggingControlPoint({ arcIdx, pointIdx: ptIdx });
-                setSelectedElement({ type: 'arc', id: arc.id });
-                return;
-              }
-            }
-          }
-
-          // Check if click is on arc line
-          const allPoints = [{ x: fromX, y: fromY }, ...(arc.controlPoints || []), { x: toX, y: toY }];
-          for (let i = 0; i < allPoints.length - 1; i++) {
-            const p1 = allPoints[i];
-            const p2 = allPoints[i + 1];
-            const dist = distanceToSegment(x, y, p1.x, p1.y, p2.x, p2.y);
-            if (dist <= 8) {
-              setSelectedElement({ type: 'arc', id: arc.id });
-              return;
-            }
-          }
-        }
-      }
-
-      setSelectedElement(null);
-    } else if (tool === 'place') {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const newPlace = { id: Date.now(), x, y, label: 'P', tokens: 0 };
-      setPlaces([...places, newPlace]);
-    } else if (tool === 'transition') {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const newTransition = { id: Date.now(), x, y, label: 'T' };
-      setTransitions([...transitions, newTransition]);
-    } else if (tool === 'arc') {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-
-      // Check for place/transition click
+    // If in arc connection mode
+    if (arcConnectionMode) {
+      // Look for place/transition to connect
       for (const place of places) {
         if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
           if (!arcStart) {
-            setArcStart({ type: 'place', element: place });
+            setArcStart({ type: 'place', id: place.id, element: place });
           } else {
             const newArc = {
               id: Date.now(),
@@ -279,6 +276,8 @@ function PetriNetEditor() {
             };
             setArcs([...arcs, newArc]);
             setArcStart(null);
+            setArcConnectionMode(false);
+            setArcPreviewPoints([]);
           }
           return;
         }
@@ -288,7 +287,7 @@ function PetriNetEditor() {
         const dist = distancePointToRect(x, y, trans.x - TRANSITION_WIDTH / 2, trans.y - TRANSITION_HEIGHT / 2, TRANSITION_WIDTH, TRANSITION_HEIGHT);
         if (dist <= 5) {
           if (!arcStart) {
-            setArcStart({ type: 'transition', element: trans });
+            setArcStart({ type: 'transition', id: trans.id, element: trans });
           } else {
             const newArc = {
               id: Date.now(),
@@ -299,28 +298,77 @@ function PetriNetEditor() {
             };
             setArcs([...arcs, newArc]);
             setArcStart(null);
+            setArcConnectionMode(false);
+            setArcPreviewPoints([]);
           }
           return;
         }
       }
+      return;
+    }
 
-      if (arcStart) {
-        setEdgePreviewPoints([...edgePreviewPoints, { x, y }]);
+    // Normal selection and element interaction (cursor mode)
+    // Check for place click - drag existing place or select it
+    for (const place of places) {
+      if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
+        setSelectedElement({ type: 'place', id: place.id });
+        setDraggingElement({ type: 'place', id: place.id });
+        setDraggingOffset({ x: x - place.x, y: y - place.y });
+        return;
       }
-    } else if (tool === 'addTokens') {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+    }
 
-      for (const place of places) {
-        if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
-          setPlaces(places.map(p => 
-            p.id === place.id ? { ...p, tokens: p.tokens + 1 } : p
-          ));
-          return;
+    // Check for transition click - drag existing transition or select it
+    for (const trans of transitions) {
+      const dist = distancePointToRect(x, y, trans.x - TRANSITION_WIDTH / 2, trans.y - TRANSITION_HEIGHT / 2, TRANSITION_WIDTH, TRANSITION_HEIGHT);
+      if (dist <= 5) {
+        setSelectedElement({ type: 'transition', id: trans.id });
+        setDraggingElement({ type: 'transition', id: trans.id });
+        setDraggingOffset({ x: x - trans.x, y: y - trans.y });
+        return;
+      }
+    }
+
+    // Check for arc click
+    for (let arcIdx = 0; arcIdx < arcs.length; arcIdx++) {
+      const arc = arcs[arcIdx];
+      const fromObj = arc.from.type === 'place' ? places.find(p => p.id === arc.from.id) : transitions.find(t => t.id === arc.from.id);
+      const toObj = arc.to.type === 'place' ? places.find(p => p.id === arc.to.id) : transitions.find(t => t.id === arc.to.id);
+      
+      if (fromObj && toObj) {
+        const fromX = fromObj.x;
+        const fromY = fromObj.y;
+        const toX = toObj.x;
+        const toY = toObj.y;
+
+        // Check for control point click
+        if (arc.controlPoints && arc.controlPoints.length > 0) {
+          for (let ptIdx = 0; ptIdx < arc.controlPoints.length; ptIdx++) {
+            const pt = arc.controlPoints[ptIdx];
+            if (Math.hypot(x - pt.x, y - pt.y) <= 8) {
+              setDraggingControlPoint({ arcIdx, pointIdx: ptIdx });
+              setSelectedElement({ type: 'arc', id: arc.id });
+              return;
+            }
+          }
+        }
+
+        // Check if click is on arc line
+        const allPoints = [{ x: fromX, y: fromY }, ...(arc.controlPoints || []), { x: toX, y: toY }];
+        for (let i = 0; i < allPoints.length - 1; i++) {
+          const p1 = allPoints[i];
+          const p2 = allPoints[i + 1];
+          const dist = distanceToSegment(x, y, p1.x, p1.y, p2.x, p2.y);
+          if (dist <= 8) {
+            setSelectedElement({ type: 'arc', id: arc.id });
+            return;
+          }
         }
       }
     }
+
+    // Deselect if click on empty area
+    setSelectedElement(null);
   };
 
   const handleCanvasMouseUp = () => {
@@ -328,7 +376,60 @@ function PetriNetEditor() {
     setDraggingControlPoint(null);
   };
 
+  const handleCanvasDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleCanvasDrop = (e) => {
+    e.preventDefault();
+    if (!draggedTool || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (draggedTool === 'place') {
+      // Check collision with other elements
+      if (hasCollisionWithOthers('place', null, x, y)) {
+        return; // Don't allow placement if collision detected
+      }
+      const newPlace = { id: Date.now(), x, y, label: 'P', tokens: 0 };
+      setPlaces([...places, newPlace]);
+    } else if (draggedTool === 'transition') {
+      // Check collision with other elements
+      if (hasCollisionWithOthers('transition', null, x, y)) {
+        return; // Don't allow placement if collision detected
+      }
+      const newTransition = { id: Date.now(), x, y, label: 'T' };
+      setTransitions([...transitions, newTransition]);
+    } else if (draggedTool === 'addTokens') {
+      // Find place at drop position
+      for (const place of places) {
+        if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
+          setPlaces(places.map(p => 
+            p.id === place.id ? { ...p, tokens: p.tokens + 1 } : p
+          ));
+          break;
+        }
+      }
+    }
+
+    setDraggedTool(null);
+  };
+
   // ============ TOOLBAR HANDLERS ============
+
+  const handleToolDragStart = (toolName) => {
+    setDraggedTool(toolName);
+  };
+
+  const handleArcButtonClick = () => {
+    setArcConnectionMode(!arcConnectionMode);
+    if (!arcConnectionMode) {
+      setArcStart(null);
+      setArcPreviewPoints([]);
+    }
+  };
 
   const handleDeleteSelected = () => {
     if (!selectedElement) return;
@@ -411,6 +512,7 @@ function PetriNetEditor() {
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
+    // Calculate bounds including arcs
     places.forEach(p => {
       minX = Math.min(minX, p.x - PLACE_RADIUS);
       minY = Math.min(minY, p.y - PLACE_RADIUS);
@@ -423,6 +525,17 @@ function PetriNetEditor() {
       minY = Math.min(minY, t.y - TRANSITION_HEIGHT / 2);
       maxX = Math.max(maxX, t.x + TRANSITION_WIDTH / 2);
       maxY = Math.max(maxY, t.y + TRANSITION_HEIGHT / 2);
+    });
+
+    arcs.forEach(arc => {
+      if (arc.controlPoints && arc.controlPoints.length > 0) {
+        arc.controlPoints.forEach(pt => {
+          minX = Math.min(minX, pt.x);
+          minY = Math.min(minY, pt.y);
+          maxX = Math.max(maxX, pt.x);
+          maxY = Math.max(maxY, pt.y);
+        });
+      }
     });
 
     const padding = 40;
@@ -470,7 +583,27 @@ function PetriNetEditor() {
           pathD = `M ${fromX},${fromY} L ${toX},${toY}`;
         }
 
-        svg += `  <path d="${pathD}" stroke="#7c3aed" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>\n`;
+        // Calculate arrow direction
+        let dx, dy;
+        if (arc.controlPoints && arc.controlPoints.length > 0) {
+          const lastPt = arc.controlPoints[arc.controlPoints.length - 1];
+          dx = toX - (lastPt.x - minX);
+          dy = toY - (lastPt.y - minY);
+        } else {
+          dx = toX - fromX;
+          dy = toY - fromY;
+        }
+        const len = Math.hypot(dx, dy);
+        const dir = { x: dx / len, y: dy / len };
+
+        // Position arrow before node
+        const fromNodeRadius = arc.to.type === 'place' ? PLACE_RADIUS : TRANSITION_HEIGHT / 2;
+        const arrowX = toX - dir.x * fromNodeRadius;
+        const arrowY = toY - dir.y * fromNodeRadius;
+        const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
+
+        svg += `  <path d="${pathD}" stroke="#7c3aed" stroke-width="2.5" fill="none"/>\n`;
+        svg += `  <polygon points="${arrowPoints}" fill="#5b21b6" stroke="#5b21b6" stroke-width="0.5"/>\n`;
       }
     });
 
@@ -478,7 +611,7 @@ function PetriNetEditor() {
     places.forEach(p => {
       const x = p.x - minX;
       const y = p.y - minY;
-      svg += `  <circle cx="${x}" cy="${y}" r="${PLACE_RADIUS}" fill="none" stroke="#5b21b6" stroke-width="2"/>\n`;
+      svg += `  <circle cx="${x}" cy="${y}" r="${PLACE_RADIUS}" fill="white" stroke="#5b21b6" stroke-width="2"/>\n`;
       svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${p.label}</text>\n`;
       
       // Draw tokens
@@ -488,7 +621,7 @@ function PetriNetEditor() {
           const angle = (i / p.tokens) * 2 * Math.PI;
           const tx = x + Math.cos(angle) * 12;
           const ty = y + Math.sin(angle) * 12;
-          svg += `  <circle cx="${tx}" cy="${ty}" r="${tokenRadius}" fill="#5b21b6"/>\n`;
+          svg += `  <circle cx="${tx}" cy="${ty}" r="${tokenRadius}" fill="#5b21b6" stroke="none"/>\n`;
         }
       }
     });
@@ -497,7 +630,7 @@ function PetriNetEditor() {
     transitions.forEach(t => {
       const x = t.x - minX;
       const y = t.y - minY;
-      svg += `  <rect x="${x - TRANSITION_WIDTH / 2}" y="${y - TRANSITION_HEIGHT / 2}" width="${TRANSITION_WIDTH}" height="${TRANSITION_HEIGHT}" fill="none" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
+      svg += `  <rect x="${x - TRANSITION_WIDTH / 2}" y="${y - TRANSITION_HEIGHT / 2}" width="${TRANSITION_WIDTH}" height="${TRANSITION_HEIGHT}" fill="white" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
       svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${t.label}</text>\n`;
     });
 
@@ -520,7 +653,7 @@ function PetriNetEditor() {
         ref={canvasRef}
         style={{ 
           border: 'none', 
-          cursor: tool === 'cursor' ? 'default' : 'crosshair', 
+          cursor: arcConnectionMode ? 'crosshair' : 'default', 
           display: 'block',
           width: '100%',
           height: '100%'
@@ -529,6 +662,8 @@ function PetriNetEditor() {
         onMouseDown={handleCanvasMouseDown}
         onMouseUp={handleCanvasMouseUp}
         onMouseLeave={handleCanvasMouseUp}
+        onDragOver={handleCanvasDragOver}
+        onDrop={handleCanvasDrop}
       >
         {/* Draw arcs */}
         {arcs.map((arc) => {
@@ -645,6 +780,7 @@ function PetriNetEditor() {
               stroke={selectedElement?.id === place.id ? '#7c3aed' : '#5b21b6'}
               strokeWidth={selectedElement?.id === place.id ? 3 : 2}
               style={{ cursor: 'pointer' }}
+              onDoubleClick={() => setEditingLabel({ type: 'place', id: place.id })}
             />
             <text
               x={place.x}
@@ -655,6 +791,7 @@ function PetriNetEditor() {
               fontFamily="Arial"
               fill="#5b21b6"
               fontWeight="bold"
+              style={{ pointerEvents: 'none' }}
             >
               {place.label}
             </text>
@@ -694,6 +831,7 @@ function PetriNetEditor() {
               strokeWidth={selectedElement?.id === trans.id ? 3 : 2}
               rx="4"
               style={{ cursor: 'pointer' }}
+              onDoubleClick={() => setEditingLabel({ type: 'transition', id: trans.id })}
             />
             <text
               x={trans.x}
@@ -704,6 +842,7 @@ function PetriNetEditor() {
               fontFamily="Arial"
               fill="#5b21b6"
               fontWeight="bold"
+              style={{ pointerEvents: 'none' }}
             >
               {trans.label}
             </text>
@@ -747,37 +886,36 @@ function PetriNetEditor() {
 
           <div className="tools-list">
             <button
-              className={`tool-item ${tool === 'cursor' ? 'active' : ''}`}
-              onClick={() => { setTool('cursor'); setArcStart(null); }}
-              title="Cursor (Select)"
-            >
-              <span className="tool-label">Cursor</span>
-            </button>
-            <button
-              className={`tool-item ${tool === 'place' ? 'active' : ''}`}
-              onClick={() => { setTool('place'); setArcStart(null); }}
-              title="Poziție (Loc)"
+              className={`tool-item ${draggedTool === 'place' ? 'active' : ''}`}
+              draggable
+              onDragStart={() => handleToolDragStart('place')}
+              onDragEnd={() => setDraggedTool(null)}
+              title="Drag la canvas pentru adăugare Poziție"
             >
               <span className="tool-label">Poziție</span>
             </button>
             <button
-              className={`tool-item ${tool === 'transition' ? 'active' : ''}`}
-              onClick={() => { setTool('transition'); setArcStart(null); }}
-              title="Tranziție"
+              className={`tool-item ${draggedTool === 'transition' ? 'active' : ''}`}
+              draggable
+              onDragStart={() => handleToolDragStart('transition')}
+              onDragEnd={() => setDraggedTool(null)}
+              title="Drag la canvas pentru adăugare Tranziție"
             >
               <span className="tool-label">Tranziție</span>
             </button>
             <button
-              className={`tool-item ${tool === 'arc' ? 'active' : ''}`}
-              onClick={() => { setTool('arc'); }}
-              title="Arc"
+              className={`tool-item ${arcConnectionMode ? 'active' : ''}`}
+              onClick={handleArcButtonClick}
+              title="Click apoi selectează start și end punct pentru Arc"
             >
               <span className="tool-label">Arc</span>
             </button>
             <button
-              className={`tool-item ${tool === 'addTokens' ? 'active' : ''}`}
-              onClick={() => { setTool('addTokens'); setArcStart(null); }}
-              title="Adaugă tokeni"
+              className={`tool-item ${draggedTool === 'addTokens' ? 'active' : ''}`}
+              draggable
+              onDragStart={() => handleToolDragStart('addTokens')}
+              onDragEnd={() => setDraggedTool(null)}
+              title="Drag la canvas pentru adăugare Token pe o Poziție"
             >
               <span className="tool-label">Token</span>
             </button>
