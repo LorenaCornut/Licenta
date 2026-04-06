@@ -154,7 +154,11 @@ exports.saveDiagram = async (req, res) => {
           const labelValue = (edge.label && edge.label.trim() !== '') ? edge.label.trim() : 'ε';
           
           // Save complete edge data including loopDirection and routing points
-          const textData = { label: labelValue };
+          const textData = { 
+            label: labelValue,
+            from: startId,  // Store original frontend IDs too
+            to: endId
+          };
           if (edge.loopDirection) {
             textData.loopDirection = edge.loopDirection;
           }
@@ -162,7 +166,7 @@ exports.saveDiagram = async (req, res) => {
           // Salvează punctele de rută custom (controlPoints sau points)
           const routingPoints = edge.controlPoints || edge.points || [];
           
-          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}", loopDirection="${edge.loopDirection || 'undefined'}", routingPoints="${routingPoints.length}"`);
+          console.log(`Saving edge ${startId}->${endId}: label="${labelValue}", routingPoints="${routingPoints.length}", frontendIds="${startId}-${endId}"`);
           
           await pool.query(
             `INSERT INTO legaturi_existente 
@@ -181,6 +185,7 @@ exports.saveDiagram = async (req, res) => {
       }
     }
 
+    console.log(`Diagram saved: ${idDiagrama}, nodes: ${finalNodes.length}, edges: ${finalEdges.length}`);
     return res.status(200).json({
       message: 'Diagrama a fost salvată cu succes!',
       diagramId: idDiagrama
@@ -315,7 +320,9 @@ exports.loadDiagram = async (req, res) => {
         id: el.id,
         label: el.name,
         x: el.x,
-        y: el.y
+        y: el.y,
+        width: el.width,
+        height: el.height
       }));
       
       const edges = connections.map(conn => {
@@ -324,11 +331,13 @@ exports.loadDiagram = async (req, res) => {
           to: conn.toId
         };
         // Re-add controlPoints if they exist
-        if (conn.controlPoints) {
+        if (conn.controlPoints && conn.controlPoints.length > 0) {
           edge.controlPoints = conn.controlPoints;
         }
         return edge;
       });
+      
+      console.log(`Loaded diagram ${diagramId}: ${nodes.length} nodes, ${edges.length} edges`);
       
       return res.status(200).json({
         diagram: {

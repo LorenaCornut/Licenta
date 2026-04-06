@@ -5,6 +5,35 @@ import { useNavigate, useParams } from 'react-router-dom';
 // ============ HELPER FUNCTIONS ============
 
 /**
+ * Calculează distanța perpendiculară de la un punct la un segment de linie
+ */
+function distancePointToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  
+  if (len2 === 0) {
+    return Math.hypot(px - x1, py - y1);
+  }
+  
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  
+  const closestX = x1 + t * dx;
+  const closestY = y1 + t * dy;
+  
+  return Math.hypot(px - closestX, py - closestY);
+}
+
+/**
+ * Determină pe ce parte a liniei e punctul
+ */
+function sideOfLine(px, py, x1, y1, x2, y2) {
+  const crossProduct = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+  return crossProduct > 0 ? 1 : -1;
+}
+
+/**
  * Calculează distanța de la un punct la un dreptunghi
  */
 function distancePointToRect(px, py, x, y, width, height) {
@@ -54,6 +83,126 @@ function pointsToSmoothPath(points) {
   }
   
   return d;
+}
+
+/**
+ * Calculează raza unei forme în direcția dată (pentru a poziția săgeți corect)
+ */
+function getRadiusInDirection(nodeType, direction, nodeWidth = 50, nodeHeight = 30, nodeRadius = 25) {
+  if (nodeType === 'place') {
+    // Pentru cerc, distanța e mereu raza
+    return nodeRadius;
+  } else {
+    // Pentru dreptunghi (transition), calculez unde linia lovește marginea
+    const halfWidth = nodeWidth / 2;
+    const halfHeight = nodeHeight / 2;
+    
+    if (Math.abs(direction.x) < 0.001 && Math.abs(direction.y) < 0.001) {
+      return halfWidth;
+    }
+    
+    const absX = Math.abs(direction.x);
+    const absY = Math.abs(direction.y);
+    
+    // Distanța până la marginea verticală vs orizontală
+    const distToVertical = halfWidth / absX;
+    const distToHorizontal = halfHeight / absY;
+    
+    // Luez cea mai mică distanță (punctul de intersecție pe marginea dreptunghiului)
+    return Math.min(distToVertical, distToHorizontal);
+  }
+}
+
+/**
+ * Construiește un path Bezier care evită obstacolele (alte noduri)
+ * Returnează { pathD, controlPoints } pentru a putea extrage ultimul punct pe curbă
+ */
+function buildSmoothedPathPetri(x1, y1, x2, y2, allPlaces, allTransitions, excludeIds = []) {
+  const margin = 35; // buffer în jurul nodului
+  
+  // Combinarea tuturor nodurilor
+  const allNodes = [
+    ...allPlaces.map(p => ({ ...p, type: 'place', radius: 25 })),
+    ...allTransitions.map(t => ({ ...t, type: 'transition', radius: 25 }))
+  ];
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist === 0) return { pathD: `M ${x1},${y1}`, controlPoints: [{ x: x1, y: y1 }] };
+
+  const ux = dx / dist;
+  const uy = dy / dist;
+
+  const px = -uy;
+  const py = ux;
+
+  // Detectez obstacolele
+  const obstacleNodes = allNodes
+    .filter(n => !excludeIds.includes(n.id))
+    .map(n => {
+      // Calculez distanța de la nod la segment de linie
+      let d;
+      if (n.type === 'place') {
+        // Pentru place (cerc): distanța de la centru la linie minus raza
+        d = Math.max(0, distancePointToSegment(n.x, n.y, x1, y1, x2, y2) - n.radius);
+      } else {
+        // Pentru transition (dreptunghi): distanța de la dreptunghi la linie
+        const halfW = 25; // TRANSITION_WIDTH / 2
+        const halfH = 15; // TRANSITION_HEIGHT / 2
+        const rectDist = distancePointToSegment(n.x, n.y, x1, y1, x2, y2);
+        d = Math.max(0, rectDist - Math.hypot(halfW, halfH) / 2);
+      }
+
+      const side = sideOfLine(n.x, n.y, x1, y1, x2, y2);
+
+      const dx_to_node = n.x - x1;
+      const dy_to_node = n.y - y1;
+      const t = (dx_to_node * (x2 - x1) + dy_to_node * (y2 - y1)) / (dist * dist);
+      const tClamped = Math.max(0, Math.min(1, t));
+
+      return { node: n, d, side, t: tClamped, nodeRadius: n.radius };
+    });
+
+  // Creed puncte de control pentru fiecare obstacol
+  const controlPoints = [{ x: x1, y: y1 }];
+
+  const obstaclesWithOffset = obstacleNodes
+    .filter(o => o.d < o.nodeRadius + margin)
+    .sort((a, b) => a.t - b.t);
+
+  obstaclesWithOffset.forEach(obstacle => {
+    const t = obstacle.t;
+    const ptOnLine = {
+      x: x1 + ux * (dist * t),
+      y: y1 + uy * (dist * t)
+    };
+
+    const penetration = (obstacle.nodeRadius + margin) - obstacle.d;
+    const strength = penetration / (obstacle.nodeRadius + margin);
+    const offsetDistance = strength * (obstacle.nodeRadius + 30);
+
+    const toObstacleX = obstacle.node.x - ptOnLine.x;
+    const toObstacleY = obstacle.node.y - ptOnLine.y;
+    const toObstacleLen = Math.hypot(toObstacleX, toObstacleY);
+
+    let offsetX = 0;
+    let offsetY = 0;
+    if (toObstacleLen > 0) {
+      offsetX = -toObstacleX / toObstacleLen * offsetDistance;
+      offsetY = -toObstacleY / toObstacleLen * offsetDistance;
+    }
+
+    controlPoints.push({
+      x: ptOnLine.x + offsetX,
+      y: ptOnLine.y + offsetY
+    });
+  });
+
+  controlPoints.push({ x: x2, y: y2 });
+
+  return { pathD: pointsToSmoothPath(controlPoints), controlPoints };
 }
 
 /**
@@ -112,29 +261,88 @@ function PetriNetEditor() {
     setIsSaving(true);
     try {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/diagrams/save`, {
+      const response = await fetch(`${apiUrl}/api/petri-nets/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: parseInt(userId),
           title: diagramName.trim() || 'Rețea Petri',
-          tipDiagrama: 'Rețea Petri',
           places: places,
           transitions: transitions,
-          arcs: arcs,
+          // Save only user-adjusted control points in arcs (if any exist)
+          arcs: arcs.map(a => {
+            const arc = { from: a.from, to: a.to, id: a.id };
+            // Only include controlPoints if user manually adjusted them
+            if (a.controlPoints && a.controlPoints.length > 0) {
+              const userAdjusted = a.controlPoints.filter(pt => pt && pt.isUserAdjusted);
+              if (userAdjusted.length > 0) {
+                arc.controlPoints = userAdjusted;
+              }
+            }
+            return arc;
+          }),
           diagramId: diagramId
         })
       });
 
+      const data = await response.json();
+
       if (response.ok) {
         setIsSaving(false);
+        
+        // Success - show toast notification
+        const successMsg = diagramId ? 'Rețea Petri actualizată!' : 'Rețea Petri salvată!';
+        console.log(`✓ ${successMsg}`);
+        
+        // If it's a new diagram, navigate to it
+        if (data.diagramId && !diagramId) {
+          navigate(`/petrinet/${data.diagramId}`);
+        }
       } else {
-        alert('Eroare la salvarea diagramei!');
         setIsSaving(false);
+        console.error('❌ Eroare:', data.message);
+        alert(data.message || 'Eroare la salvarea diagramei!');
       }
     } catch (err) {
-      alert('Eroare de rețea: ' + err.message);
       setIsSaving(false);
+      console.error('❌ Eroare de rețea:', err.message);
+      alert('Eroare de rețea: ' + err.message);
+    }
+  };
+
+  // ============ LOAD DIAGRAM ============
+
+  useEffect(() => {
+    if (diagramId) {
+      console.log(`Loading diagram: ${diagramId}`);
+      loadPetriDiagram();
+    }
+  }, [diagramId]); // Depend on diagramId to reload when URL changes
+
+  const loadPetriDiagram = async () => {
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      console.log(`Fetching from: ${apiUrl}/api/petri-nets/${diagramId}`);
+      
+      const response = await fetch(`${apiUrl}/api/petri-nets/${diagramId}`);
+
+      if (!response.ok) {
+        console.error(`Failed to load diagram: ${response.status}`);
+        return;
+      }
+
+      const data = await response.json();
+      console.log(`Loaded diagram:`, data);
+      
+      // Încarcă datele în state
+      setDiagramName(data.diagram.title);
+      setPlaces(data.places || []);
+      setTransitions(data.transitions || []);
+      setArcs(data.arcs || []);
+      
+      console.log(`✓ Rețea Petri încărcată: ${data.diagram.title}`);
+    } catch (err) {
+      console.error('Eroare la încărcarea diagramei:', err);
     }
   };
 
@@ -238,7 +446,11 @@ function PetriNetEditor() {
       setArcs(arcs.map((arc, arcIdx) => {
         if (arcIdx !== draggingControlPoint.arcIdx) return arc;
         const updatedPoints = [...(arc.controlPoints || [])];
-        updatedPoints[draggingControlPoint.pointIdx] = { x, y };
+        updatedPoints[draggingControlPoint.pointIdx] = { 
+          x, 
+          y,
+          isUserAdjusted: true  // Mark as manually adjusted by user
+        };
         return { ...arc, controlPoints: updatedPoints };
       }));
     }
@@ -268,9 +480,9 @@ function PetriNetEditor() {
             setArcStart({ type: 'place', id: place.id, element: place });
           } else {
             const newArc = {
-              id: Date.now(),
-              from: arcStart,
-              to: { type: 'place', id: place.id },
+              id: `arc-${Date.now()}`,
+              from: arcStart.id,
+              to: place.id,
               label: '1',
               controlPoints: []
             };
@@ -290,9 +502,9 @@ function PetriNetEditor() {
             setArcStart({ type: 'transition', id: trans.id, element: trans });
           } else {
             const newArc = {
-              id: Date.now(),
-              from: arcStart,
-              to: { type: 'transition', id: trans.id },
+              id: `arc-${Date.now()}`,
+              from: arcStart.id,
+              to: trans.id,
               label: '1',
               controlPoints: []
             };
@@ -566,40 +778,52 @@ function PetriNetEditor() {
         : transitions.find(t => t.id === arc.to.id);
 
       if (fromObj && toObj) {
-        const fromX = fromObj.x - minX;
-        const fromY = fromObj.y - minY;
-        const toX = toObj.x - minX;
-        const toY = toObj.y - minY;
+        const fromX = fromObj.x;
+        const fromY = fromObj.y;
+        const toX = toObj.x;
+        const toY = toObj.y;
 
-        let pathD;
-        if (arc.controlPoints && arc.controlPoints.length > 0) {
-          const allPoints = [
-            { x: fromX, y: fromY },
-            ...arc.controlPoints.map(p => ({ x: p.x - minX, y: p.y - minY })),
-            { x: toX, y: toY }
-          ];
-          pathD = pointsToSmoothPath(allPoints);
-        } else {
-          pathD = `M ${fromX},${fromY} L ${toX},${toY}`;
-        }
+        // Build smoothed path that avoids obstacles
+        const pathResult = buildSmoothedPathPetri(
+          fromX, fromY, toX, toY,
+          places, transitions,
+          [arc.from.id, arc.to.id]
+        );
+
+        // Build with offset for SVG export
+        const placesOffset = places.map(p => ({ ...p, x: p.x - minX, y: p.y - minY }));
+        const transitionsOffset = transitions.map(t => ({ ...t, x: t.x - minX, y: t.y - minY }));
+
+        const pathResultOffset = buildSmoothedPathPetri(
+          fromX - minX, fromY - minY,
+          toX - minX, toY - minY,
+          placesOffset, transitionsOffset,
+          [arc.from.id, arc.to.id]
+        );
+
+        const pathD = pathResultOffset.pathD;
+        const controlPoints = pathResultOffset.controlPoints;
 
         // Calculate arrow direction
         let dx, dy;
-        if (arc.controlPoints && arc.controlPoints.length > 0) {
-          const lastPt = arc.controlPoints[arc.controlPoints.length - 1];
-          dx = toX - (lastPt.x - minX);
-          dy = toY - (lastPt.y - minY);
+        if (controlPoints.length >= 2) {
+          const secondLast = controlPoints[controlPoints.length - 2];
+          const lastPt = controlPoints[controlPoints.length - 1];
+          dx = lastPt.x - secondLast.x;
+          dy = lastPt.y - secondLast.y;
         } else {
-          dx = toX - fromX;
-          dy = toY - fromY;
+          dx = (toX - minX) - (fromX - minX);
+          dy = (toY - minY) - (fromY - minY);
         }
+
         const len = Math.hypot(dx, dy);
+        if (len === 0) return;
         const dir = { x: dx / len, y: dy / len };
 
-        // Position arrow before node
-        const fromNodeRadius = arc.to.type === 'place' ? PLACE_RADIUS : TRANSITION_HEIGHT / 2;
-        const arrowX = toX - dir.x * fromNodeRadius;
-        const arrowY = toY - dir.y * fromNodeRadius;
+        // Position arrow on the edge of the target node based on its type
+        const arrowRadius = getRadiusInDirection(arc.to.type, dir, 50, 30, 25);
+        const arrowX = (toX - minX) - dir.x * arrowRadius;
+        const arrowY = (toY - minY) - dir.y * arrowRadius;
         const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
 
         svg += `  <path d="${pathD}" stroke="#7c3aed" stroke-width="2.5" fill="none"/>\n`;
@@ -667,45 +891,68 @@ function PetriNetEditor() {
       >
         {/* Draw arcs */}
         {arcs.map((arc) => {
-          const fromObj = arc.from.type === 'place'
-            ? places.find(p => p.id === arc.from.id)
-            : transitions.find(t => t.id === arc.from.id);
-          const toObj = arc.to.type === 'place'
-            ? places.find(p => p.id === arc.to.id)
-            : transitions.find(t => t.id === arc.to.id);
-
-          if (!fromObj || !toObj) return null;
+          // arc.from și arc.to sunt stringuri de ID (nu obiecte)
+          let fromObj = places.find(p => p.id === arc.from);
+          let toObj = places.find(p => p.id === arc.to);
+          
+          // Dacă nu e în places, caută în transitions
+          if (!fromObj) fromObj = transitions.find(t => t.id === arc.from);
+          if (!toObj) toObj = transitions.find(t => t.id === arc.to);
+          
+          if (!fromObj || !toObj) {
+            console.warn(`Arc ${arc.id}: noduri nu găsite (from=${arc.from}, to=${arc.to})`);
+            return null;
+          }
+          
+          // Determină tipurile pentru getRadiusInDirection
+          const fromType = places.find(p => p.id === arc.from) ? 'place' : 'transition';
+          const toType = places.find(p => p.id === arc.to) ? 'place' : 'transition';
 
           const fromX = fromObj.x;
           const fromY = fromObj.y;
           const toX = toObj.x;
           const toY = toObj.y;
 
-          let pathD;
+          let pathResult = buildSmoothedPathPetri(
+            fromObj.x, fromObj.y, 
+            toObj.x, toObj.y, 
+            places, transitions,
+            [arc.from, arc.to]
+          );
+
+          // If arc has user-adjusted control points, use those instead
+          let pathD = pathResult.pathD;
+          let controlPoints = pathResult.controlPoints;
+          
           if (arc.controlPoints && arc.controlPoints.length > 0) {
-            const allPoints = [{ x: fromX, y: fromY }, ...arc.controlPoints, { x: toX, y: toY }];
-            pathD = pointsToSmoothPath(allPoints);
-          } else {
-            pathD = `M ${fromX},${fromY} L ${toX},${toY}`;
+            // Use user-adjusted points: start from source, add user points, end at target
+            const userControlPoints = [{ x: fromX, y: fromY }, ...arc.controlPoints, { x: toX, y: toY }];
+            pathD = pointsToSmoothPath(userControlPoints);
+            controlPoints = userControlPoints;
           }
 
-          // Calculate arrow direction
+          // Calculate arrow direction from the last control point
           let dx, dy;
-          if (arc.controlPoints && arc.controlPoints.length > 0) {
-            const lastPt = arc.controlPoints[arc.controlPoints.length - 1];
-            dx = toX - lastPt.x;
-            dy = toY - lastPt.y;
+          if (controlPoints.length >= 2) {
+            const secondLast = controlPoints[controlPoints.length - 2];
+            const lastPt = controlPoints[controlPoints.length - 1];
+            dx = lastPt.x - secondLast.x;
+            dy = lastPt.y - secondLast.y;
           } else {
             dx = toX - fromX;
             dy = toY - fromY;
           }
+          
           const len = Math.hypot(dx, dy);
+          if (len === 0) {
+            return null;
+          }
           const dir = { x: dx / len, y: dy / len };
 
-          // Position arrow before node
-          const fromNodeRadius = arc.to.type === 'place' ? PLACE_RADIUS : TRANSITION_HEIGHT / 2;
-          const arrowX = toX - dir.x * fromNodeRadius;
-          const arrowY = toY - dir.y * fromNodeRadius;
+          // Position arrow on the edge of the target node based on its type
+          const arrowRadius = getRadiusInDirection(toType, dir, 50, 30, 25);
+          const arrowX = toX - dir.x * arrowRadius;
+          const arrowY = toY - dir.y * arrowRadius;
           const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
 
           return (
@@ -716,6 +963,28 @@ function PetriNetEditor() {
                 strokeWidth="2.5"
                 fill="none"
                 pointerEvents="stroke"
+                style={{ cursor: 'grab' }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  const rect = canvasRef.current.getBoundingClientRect();
+                  const mouseX = e.clientX - rect.left;
+                  const mouseY = e.clientY - rect.top;
+                  
+                  // Create new control point at click position
+                  const newControlPoints = [...(arc.controlPoints || [])];
+                  newControlPoints.push({ x: mouseX, y: mouseY, isUserAdjusted: true });
+                  
+                  setArcs(arcs =>
+                    arcs.map((a, arcIdx) => {
+                      if (a.id !== arc.id) return a;
+                      return { ...a, controlPoints: newControlPoints };
+                    })
+                  );
+                  
+                  // Start dragging this new point immediately
+                  const arcIdx = arcs.findIndex(a => a.id === arc.id);
+                  setDraggingControlPoint({ arcIdx: arcIdx, pointIdx: newControlPoints.length - 1 });
+                }}
               />
               <polygon
                 points={arrowPoints}
@@ -723,34 +992,6 @@ function PetriNetEditor() {
                 stroke="#5b21b6"
                 strokeWidth="0.5"
               />
-
-              {/* Draw control points */}
-              {arc.controlPoints && arc.controlPoints.map((pt, idx) => (
-                <circle
-                  key={`cp-${idx}`}
-                  cx={pt.x}
-                  cy={pt.y}
-                  r="5"
-                  fill="#fbbf24"
-                  stroke="#b45309"
-                  strokeWidth="1.5"
-                  style={{ cursor: 'grab' }}
-                />
-              ))}
-
-              {/* Arc label */}
-              {arc.controlPoints && arc.controlPoints.length > 0 ? (
-                <text
-                  x={arc.controlPoints[Math.floor(arc.controlPoints.length / 2)].x}
-                  y={arc.controlPoints[Math.floor(arc.controlPoints.length / 2)].y - 15}
-                  textAnchor="middle"
-                  fontSize="12"
-                  fill="#7c3aed"
-                  fontWeight="bold"
-                >
-                  {arc.label}
-                </text>
-              ) : null}
             </g>
           );
         })}

@@ -451,8 +451,19 @@ function GraphEditor() {
           title: diagramTitle.trim(),
           tipDiagrama: 'Graf neorientat',
           nodes: nodes,
-          edges: edges,
-          diagramId: currentDiagramId // Include ID-ul dacă facem update
+          // Save only user-adjusted control points (if any exist)
+          edges: edges.map(e => {
+            const edge = { from: e.from, to: e.to };
+            // Only include controlPoints if user manually adjusted them
+            if (e.controlPoints && e.controlPoints.length > 0) {
+              const userAdjusted = e.controlPoints.filter(pt => pt && pt.isUserAdjusted);
+              if (userAdjusted.length > 0) {
+                edge.controlPoints = userAdjusted;
+              }
+            }
+            return edge;
+          }),
+          diagramId: currentDiagramId
         })
       });
 
@@ -559,7 +570,11 @@ function GraphEditor() {
           if (edgeIdx !== draggingControlPoint.edgeIdx) return edge;
           
           const updatedPoints = [...(edge.controlPoints || [])];
-          updatedPoints[draggingControlPoint.pointIdx] = { x: mouseX, y: mouseY };
+          updatedPoints[draggingControlPoint.pointIdx] = { 
+            x: mouseX, 
+            y: mouseY,
+            isUserAdjusted: true  // Mark as manually adjusted by user
+          };
           
           return { ...edge, controlPoints: updatedPoints };
         })
