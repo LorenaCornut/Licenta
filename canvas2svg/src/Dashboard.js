@@ -25,6 +25,15 @@ function Dashboard() {
   
   // State pentru poza de profil
   const [profilePicture, setProfilePicture] = useState('');
+  
+  // State pentru tab activ și grid-ul de design-uri
+  const [activeTab, setActiveTab] = useState(null); // 'my-designs', 'templates', 'ai-assistant'
+  const [designsForGrid, setDesignsForGrid] = useState([]);
+  const [loadingDesignsGrid, setLoadingDesignsGrid] = useState(false);
+  const [designPreviews, setDesignPreviews] = useState({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
+  const searchBoxRef = useRef(null);
 
   // Fetch profile picture la mount
   useEffect(() => {
@@ -63,8 +72,14 @@ function Dashboard() {
       ) {
         setShowStartMenu(false);
       }
+      if (
+        searchBoxRef.current &&
+        !searchBoxRef.current.contains(event.target)
+      ) {
+        setShowSearchSuggestions(false);
+      }
     }
-    if (showMenu || showProfileMenu || showStartMenu) {
+    if (showMenu || showProfileMenu || showStartMenu || showSearchSuggestions) {
       document.addEventListener('mousedown', handleClickOutside);
     } else {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -72,7 +87,7 @@ function Dashboard() {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showMenu, showProfileMenu, showStartMenu]);
+  }, [showMenu, showProfileMenu, showStartMenu, showSearchSuggestions]);
 
   const profileMenuRef = useRef(null);
 
@@ -142,6 +157,182 @@ function Dashboard() {
     });
   }
 
+  // Funcție pentru a genera un preview SVG simplu din datele diagramei
+  function generatePreviewSVG(elements, connections) {
+    if (!elements || elements.length === 0) {
+      return '<svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg"><rect x="10" y="10" width="280" height="180" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="2" rx="4"/><text x="150" y="105" text-anchor="middle" font-size="16" fill="#8b5cf6" font-family="Arial">Diagramă goală</text></svg>';
+    }
+
+    // Calculează boundingbox din elemente
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    elements.forEach(el => {
+      const x = el.x || 0;
+      const y = el.y || 0;
+      const w = el.width || 60;
+      const h = el.height || 60;
+      minX = Math.min(minX, x - w/2);
+      minY = Math.min(minY, y - h/2);
+      maxX = Math.max(maxX, x + w/2);
+      maxY = Math.max(maxY, y + h/2);
+    });
+
+    if (maxX === -Infinity) {
+      maxX = 300;
+      minX = 0;
+      maxY = 200;
+      minY = 0;
+    }
+
+    const padding = 20;
+    const width = Math.max(300, maxX - minX + padding * 2);
+    const height = Math.max(200, maxY - minY + padding * 2);
+    const offsetX = -minX + padding;
+    const offsetY = -minY + padding;
+
+    let svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#f3e8ff"/>`;
+
+    // Desenează conexiunile (muchiile/tranzițiile)
+    if (connections && Array.isArray(connections)) {
+      connections.forEach(conn => {
+        const fromNode = elements.find(el => el.id === conn.fromId);
+        const toNode = elements.find(el => el.id === conn.toId);
+        
+        if (fromNode && toNode) {
+          const x1 = (fromNode.x || 0) + offsetX;
+          const y1 = (fromNode.y || 0) + offsetY;
+          const x2 = (toNode.x || 0) + offsetX;
+          const y2 = (toNode.y || 0) + offsetY;
+          svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8b5cf6" stroke-width="1.5"/>`;
+        }
+      });
+    }
+
+    // Desenează nodurile/stările ca cercuri
+    elements.forEach((el, idx) => {
+      const x = (el.x || 0) + offsetX;
+      const y = (el.y || 0) + offsetY;
+      const r = 20;
+      svg += `<circle cx="${x}" cy="${y}" r="${r}" fill="#ede9fe" stroke="#8b5cf6" stroke-width="2"/>`;
+      
+      // Adează label trunchiat
+      const label = (el.name || el.label || '').substring(0, 5);
+      if (label) {
+        svg += `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="10" fill="#5b21b6" font-family="Arial">${label}</text>`;
+      }
+    });
+
+    svg += '</svg>';
+    return svg;
+  }
+
+  // Funcție pentru a prelua designuri și a le afișa în grid
+  async function handleMyDesignsClick() {
+    if (activeTab === 'my-designs') {
+      setActiveTab(null);
+      return;
+    }
+
+    if (!userId) {
+      alert('Trebuie să fii autentificat!');
+      return;
+    }
+
+    setActiveTab('my-designs');
+    setLoadingDesignsGrid(true);
+
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/diagrams/user/${userId}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setDesignsForGrid(data.diagrams || []);
+        
+        // Preload previews pentru fiecare design
+        const previews = {};
+        for (const diagram of (data.diagrams || [])) {
+          try {
+            const detailResponse = await fetch(`${apiUrl}/api/diagrams/${diagram.id_diagrama}`);
+            const detailData = await detailResponse.json();
+            
+            const elements = detailData.elements || [];
+            const connections = detailData.connections || [];
+            previews[diagram.id_diagrama] = generatePreviewSVG(elements, connections);
+          } catch (err) {
+            console.error('Error loading diagram detail:', err);
+            previews[diagram.id_diagrama] = generatePreviewSVG([], []);
+          }
+        }
+        setDesignPreviews(previews);
+      } else {
+        alert('Eroare la încărcarea design-urilor');
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      alert('Eroare de rețea');
+    }
+
+    setLoadingDesignsGrid(false);
+  }
+
+  // Obține sugestiile pe baza query-ului
+  function getSearchSuggestions() {
+    if (!searchQuery.trim() || designsForGrid.length === 0) {
+      return [];
+    }
+
+    const query = searchQuery.toLowerCase();
+    const suggestions = designsForGrid
+      .filter(diagram => diagram.titlu.toLowerCase().includes(query))
+      .slice(0, 8); // Max 8 sugestii
+
+    return suggestions;
+  }
+
+  // Handle click pe o sugestie
+  function handleSuggestionClick(diagram) {
+    setSearchQuery(diagram.titlu);
+    setShowSearchSuggestions(false);
+  }
+
+  // Încarcă designs dacă nu sunt încărcați și utilizatorul tipărește în search
+  async function loadDesignsIfNeeded() {
+    if (designsForGrid.length === 0 && !loadingDesignsGrid && userId) {
+      setLoadingDesignsGrid(true);
+      try {
+        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+        const response = await fetch(`${apiUrl}/api/diagrams/user/${userId}`);
+        const data = await response.json();
+
+        if (response.ok) {
+          setDesignsForGrid(data.diagrams || []);
+          
+          // Preload previews
+          const previews = {};
+          for (const diagram of (data.diagrams || [])) {
+            try {
+              const detailResponse = await fetch(`${apiUrl}/api/diagrams/${diagram.id_diagrama}`);
+              const detailData = await detailResponse.json();
+              
+              const elements = detailData.elements || [];
+              const connections = detailData.connections || [];
+              previews[diagram.id_diagrama] = generatePreviewSVG(elements, connections);
+            } catch (err) {
+              console.error('Error loading diagram detail:', err);
+              previews[diagram.id_diagrama] = generatePreviewSVG([], []);
+            }
+          }
+          setDesignPreviews(previews);
+          setActiveTab('my-designs');
+        }
+      } catch (err) {
+        console.error('Error loading designs:', err);
+      }
+      setLoadingDesignsGrid(false);
+    }
+  }
+
   function handleHelp() {
     navigate('/help');
   }
@@ -197,10 +388,10 @@ function Dashboard() {
               onClick={fetchSavedDiagrams}
             >
               <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M14 5L23 12V23H5V12L14 5Z" fill="#5b21b6"/>
-                <path d="M14 7L21 13V21H7V13L14 7Z" fill="#ede9fe"/>
-              </svg>
-              <span className="sidebar-btn-label">Pornire</span>
+              <rect x="5" y="8" width="18" height="12" rx="3" stroke="#5b21b6" strokeWidth="2" fill="none"/>
+              <rect x="9" y="12" width="10" height="4" rx="1" stroke="#5b21b6" strokeWidth="1" fill="none"/>
+            </svg>
+              <span className="sidebar-btn-label">Proiecte</span>
             </button>
             {showStartMenu && (
               <div 
@@ -252,13 +443,6 @@ function Dashboard() {
               </div>
             )}
           </div>
-          <button className="sidebar-icon-btn" aria-label="Proiecte">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="5" y="8" width="18" height="12" rx="3" stroke="#5b21b6" strokeWidth="2" fill="none"/>
-              <rect x="9" y="12" width="10" height="4" rx="1" stroke="#5b21b6" strokeWidth="1" fill="none"/>
-            </svg>
-            <span className="sidebar-btn-label">Proiecte</span>
-          </button>
           <button className="sidebar-icon-btn" aria-label="Șabloane">
             <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect x="6" y="6" width="16" height="16" rx="4" stroke="#5b21b6" strokeWidth="2" fill="none"/>
@@ -319,7 +503,7 @@ function Dashboard() {
       <main className="dashboard-main">
         <h1 className="dashboard-title dashboard-title-gradient">Ce design vei crea astăzi?</h1>
         <div className="dashboard-top-buttons">
-          <button className="dashboard-top-btn">
+          <button className="dashboard-top-btn" onClick={handleMyDesignsClick}>
             <svg width="32" height="32" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect x="4" y="7" width="14" height="11" rx="3" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
               <rect x="7" y="10" width="8" height="2.5" rx="1" stroke="#8b5cf6" strokeWidth="1" fill="none"/>
@@ -341,15 +525,102 @@ function Dashboard() {
             <span>AI Assistant</span>
           </button>
         </div>
-        <div className="dashboard-search-box">
-          <input type="text" className="dashboard-search-input dashboard-search-input-long" placeholder="Caută designuri, proiecte sau șabloane..." />
+        <div className="dashboard-search-box" ref={searchBoxRef}>
+          <input 
+            type="text" 
+            className="dashboard-search-input dashboard-search-input-long" 
+            placeholder="Caută designuri, proiecte sau șabloane..." 
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              if (e.target.value.trim()) {
+                setShowSearchSuggestions(true);
+                loadDesignsIfNeeded();
+              } else {
+                setShowSearchSuggestions(false);
+              }
+            }}
+            onFocus={() => {
+              if (searchQuery.trim()) {
+                setShowSearchSuggestions(true);
+                loadDesignsIfNeeded();
+              }
+            }}
+          />
           <button className="dashboard-search-btn" aria-label="Caută">
             <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
               <circle cx="10" cy="10" r="8" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
               <line x1="16" y1="16" x2="21" y2="21" stroke="#8b5cf6" strokeWidth="2"/>
             </svg>
           </button>
+          
+          {/* Dropdown cu sugestii */}
+          {showSearchSuggestions && getSearchSuggestions().length > 0 && (
+            <div className="search-suggestions-dropdown">
+              {getSearchSuggestions().map((diagram) => (
+                <button
+                  key={diagram.id_diagrama}
+                  className="search-suggestion-item"
+                  onClick={() => handleSuggestionClick(diagram)}
+                >
+                  <svg width="16" height="16" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: '8px' }}>
+                    <circle cx="10" cy="10" r="8" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
+                    <line x1="16" y1="16" x2="21" y2="21" stroke="#8b5cf6" strokeWidth="2"/>
+                  </svg>
+                  <span className="suggestion-text">{diagram.titlu}</span>
+                  <span className="suggestion-type">{diagram.nume_tip}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        {/* Afișare grid de design-uri dacă tab-ul "my-designs" este activ */}
+        {activeTab === 'my-designs' && (
+          <div className="designs-grid-container">
+            {loadingDesignsGrid ? (
+              <div className="designs-loading">Se încarcă design-urile...</div>
+            ) : designsForGrid.length === 0 ? (
+              <div className="designs-empty">
+                <p>Nu ai design-uri salvate încă.</p>
+                <button className="btn-create-first" onClick={() => navigate('/graph')}>
+                  Creează designul tău prim
+                </button>
+              </div>
+            ) : designsForGrid.filter(diagram => diagram.titlu.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && searchQuery ? (
+              <div className="designs-empty">
+                <p>Nu au fost găsite design-uri care să corespundă căutării: <strong>"{searchQuery}"</strong></p>
+              </div>
+            ) : (
+              <div className="designs-grid">
+                {designsForGrid
+                  .filter(diagram => 
+                    diagram.titlu.toLowerCase().includes(searchQuery.toLowerCase())
+                  )
+                  .map(diagram => (
+                  <div 
+                    key={diagram.id_diagrama}
+                    className="design-card"
+                    onClick={() => openDiagram(diagram)}
+                  >
+                    <div className="design-preview-wrapper">
+                      {designPreviews[diagram.id_diagrama] && (
+                        <div 
+                          className="design-preview"
+                          dangerouslySetInnerHTML={{ __html: designPreviews[diagram.id_diagrama] }}
+                        />
+                      )}
+                    </div>
+                    <div className="design-card-info">
+                      <h3 className="design-title">{diagram.titlu}</h3>
+                      <p className="design-type">{diagram.nume_tip}</p>
+                      <p className="design-date">Modificat: {formatDate(diagram.data_update)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {/* Butoanele Istoric și Șabloane eliminate */}
       </main>
       {/* Buton help/FAQ/AI tool dreapta jos */}
