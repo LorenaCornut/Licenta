@@ -4,6 +4,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const diagramRoutes = require('./routes/diagrams');
 const petriNetRoutes = require('./routes/petriNets');
+const classdiagramRoutes = require('./routes/classDiagrams');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,6 +21,9 @@ app.use('/api/diagrams', diagramRoutes);
 
 // Folosește rutele pentru rețele Petri
 app.use('/api/petri-nets', petriNetRoutes);
+
+// Folosește rutele pentru diagrame clase
+app.use('/api/class-diagrams', classdiagramRoutes);
 
 app.get('/', (req, res) => {
   res.send('Backend API funcționează!');

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './UMLEditor.css';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 // ============ HELPER FUNCTIONS FOR PATHFINDING ============
 
@@ -573,51 +573,111 @@ const UML_TYPES = {
 
 // Elemente pentru Sequence Diagram (toate simbolurile din poză)
 const SEQUENCE_ELEMENTS = {
+  // Participant Types (Actors/Objects)
   ACTOR: { label: 'Actor', icon: '🧑', color: '#fffde7', isNode: true },
-  OBJECT: { label: 'Object', icon: '■', color: '#f9a8d4', isNode: true },
-  ACTIVATION: { label: 'Activation', icon: '▮', color: '#bae6fd', isNode: true },
-  // Linii de mesaj custom explicite
-  LINE_ARROW: { label: 'Linie cu săgeată', icon: '→', color: '#bbf7d0', isConnection: true },
-  LINE: { label: 'Linie simplă', icon: '―', color: '#bbf7d0', isConnection: true },
-  DOTTED_ARROW: { label: 'Punctată cu săgeată', icon: '⇢', color: '#bbf7d0', isConnection: true },
-  DOTTED: { label: 'Punctată simplă', icon: '╌', color: '#bbf7d0', isConnection: true },
-  DESTROY: { label: 'Destroy', icon: '✕', color: '#4ade80', isNode: true },
+  OBJECT: { label: 'Object/Lifeline', icon: '■', color: '#f9a8d4', isNode: true },
+  ENTITY: { label: 'Entity', icon: 'E', color: '#fef3c7', isNode: true },
   BOUNDARY: { label: 'Boundary', icon: '◯', color: '#f9a8d4', isNode: true },
   CONTROL: { label: 'Control', icon: '↻', color: '#fef08a', isNode: true },
-  LOOP: { label: 'Loop', icon: '⟲', color: '#fff4e6', isNode: true },
-  ALT: { label: 'Alt', icon: '⟂', color: '#fff4e6', isNode: true }
+  
+  // Execution Elements
+  ACTIVATION: { label: 'Activation Bar', icon: '▮', color: '#bae6fd', isNode: true },
+  DESTROY: { label: 'Destroy', icon: '✕', color: '#4ade80', isNode: true },
+  
+  // Message Types (Connections)
+  SYNC_MESSAGE: { label: 'Synchronous Message', icon: '→', color: '#bbf7d0', isConnection: true },
+  ASYNC_MESSAGE: { label: 'Asynchronous Message', icon: '⇢', color: '#bbf7d0', isConnection: true },
+  RETURN_MESSAGE: { label: 'Return Message', icon: '⇠', color: '#fcd34d', isConnection: true },
+  SELF_MESSAGE: { label: 'Self Message', icon: '↻', color: '#c7d2fe', isConnection: true },
+  CREATE_MESSAGE: { label: 'Create Message', icon: '⊕', color: '#ddd6fe', isConnection: true },
+  DELETE_MESSAGE: { label: 'Delete Message', icon: '✕', color: '#fca5a5', isConnection: true },
+  
+  // Generic lines
+  LINE: { label: 'Simple Line', icon: '―', color: '#bbf7d0', isConnection: true },
+  DOTTED_LINE: { label: 'Dotted Line', icon: '╌', color: '#bbf7d0', isConnection: true },
+  
+  // Control Structures (Interaction Frames)
+  ALT: { label: 'Alt (Alternative)', icon: 'alt', color: '#fff4e6', isNode: true },
+  OPT: { label: 'Opt (Optional)', icon: 'opt', color: '#fef3c7', isNode: true },
+  LOOP: { label: 'Loop', icon: 'loop', color: '#fff4e6', isNode: true },
+  PAR: { label: 'Par (Parallel)', icon: 'par', color: '#dbeafe', isNode: true },
+  REF: { label: 'Ref (Reference)', icon: 'ref', color: '#f3e8ff', isNode: true }
 };
 
 // Elemente pentru Use Case Diagram
 const USE_CASE_ELEMENTS = {
+  // Participant Types
   ACTOR: { label: 'Actor', icon: '🧑', color: '#e8f4f8', isNode: true },
-  USE_CASE: { label: 'Use Case', icon: '●', color: '#fff4e6', isNode: true },
-  SYSTEM: { label: 'System', icon: '◻', color: '#f0f0f0', isNode: true },
-  ASSOCIATION: { label: 'Association', icon: '―', color: '#f0f0f0', isConnection: true },
-  GENERALIZATION: { label: 'Generalization', icon: '⇨', color: '#f0f0f0', isConnection: true },
-  INCLUDE: { label: 'Include', icon: '⊳', color: '#f0f0f0', isConnection: true },
-  EXTEND: { label: 'Extend', icon: '✓', color: '#f0f0f0', isConnection: true }
+  SYSTEM_ACTOR: { label: 'System Actor', icon: '⬜', color: '#dbeafe', isNode: true },
+  
+  // Core Elements
+  USE_CASE: { label: 'Use Case', icon: '●', color: '#fef3c7', isNode: true },
+  SYSTEM_BOUNDARY: { label: 'System Boundary', icon: '□', color: '#f0f0f0', isNode: true },
+  
+  // Comments/Notes
+  NOTE: { label: 'Note', icon: '📝', color: '#fef3c7', isNode: true },
+  PACKAGE: { label: 'Package', icon: '📁', color: '#fff4e6', isNode: true },
+  
+  // Relationships (Associations & Dependencies)
+  ASSOCIATION: { label: 'Association', icon: '―', color: '#9ca3af', isConnection: true },
+  INCLUDE: { label: 'Include', icon: '<<', color: '#dc2626', isConnection: true },
+  EXTEND: { label: 'Extend', icon: '>>', color: '#ea580c', isConnection: true },
+  GENERALIZATION: { label: 'Generalization', icon: '△', color: '#1f2937', isConnection: true },
+  COMMUNICATION: { label: 'Communication', icon: '↔', color: '#9ca3af', isConnection: true }
 };
 
 // Elemente pentru Component Diagram
+// Elemente pentru Component Diagram
 const COMPONENT_ELEMENTS = {
-  COMPONENT: { label: 'Component', icon: '⬚', color: '#fff4e6', isNode: true },
+  // Core Structure Elements
+  COMPONENT: { label: 'Component', icon: '◻', color: '#fff4e6', isNode: true },
+  SUBSYSTEM: { label: 'Subsystem', icon: '📁', color: '#fef3c7', isNode: true },
+  PACKAGE_COMP: { label: 'Package', icon: '📦', color: '#fff4e6', isNode: true },
+  
+  // Interface Elements
   INTERFACE: { label: 'Interface', icon: '◯', color: '#e0f2fe', isNode: true },
-  DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#f0f0f0', isConnection: true },
+  PROVIDED_INTERFACE: { label: 'Provided Interface (Lollipop)', icon: '●', color: '#84cc16', isConnection: true },
+  REQUIRED_INTERFACE: { label: 'Required Interface (Socket)', icon: '⊃', color: '#06b6d4', isConnection: true },
+  PORT: { label: 'Port', icon: '■', color: '#f0f0f0', isNode: true },
+  
+  // Physical/Artifact Elements
+  ARTIFACT: { label: 'Artifact', icon: '📄', color: '#fef08a', isNode: true },
+  
+  // Relationships
+  ASSEMBLY_CONNECTOR: { label: 'Assembly Connector', icon: '⊚', color: '#059669', isConnection: true },
+  DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#dc2626', isConnection: true },
+  DELEGATION_CONNECTOR: { label: 'Delegation Connector', icon: '⇒', color: '#7c3aed', isConnection: true },
   REALIZATION: { label: 'Realization', icon: '⇨', color: '#f0f0f0', isConnection: true }
 };
 
 // Elemente pentru Deployment Diagram
 const DEPLOYMENT_ELEMENTS = {
-  NODE: { label: 'Node', icon: '⬜', color: '#f0e68c', isNode: true },
-  ARTIFACT: { label: 'Artifact', icon: '📦', color: '#fff4e6', isNode: true },
+  // Hardware/Execution Nodes
+  NODE: { label: 'Node (Hardware)', icon: '▬', color: '#f0e68c', isNode: true },
+  DEVICE: { label: 'Device', icon: '📱', color: '#fef08a', isNode: true },
+  EXECUTION_ENVIRONMENT: { label: 'Execution Environment', icon: '◻', color: '#fed7aa', isNode: true },
+  
+  // Physical Artifacts
+  ARTIFACT: { label: 'Artifact', icon: '📄', color: '#fef08a', isNode: true },
+  DEPLOYMENT_SPEC: { label: 'Deployment Spec', icon: '📋', color: '#fcd34d', isNode: true },
+  
+  // Communication and Deployment
+  COMMUNICATION_PATH: { label: 'Communication Path', icon: '―', color: '#6b7280', isConnection: true },
+  DEPLOYMENT: { label: 'Deployment', icon: '⇢', color: '#dc2626', isConnection: true },
+  MANIFESTATION: { label: 'Manifestation', icon: '⇨', color: '#9333ea', isConnection: true },
   DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#f0f0f0', isConnection: true }
 };
 
 // Elemente pentru Object Diagram
 const OBJECT_ELEMENTS = {
+  // Instance Elements
   OBJECT_INSTANCE: { label: 'Object Instance', icon: '◻', color: '#fffef0', isNode: true },
-  LINK: { label: 'Link', icon: '―', color: '#f0f0f0', isConnection: true }
+  ANONYMOUS_OBJECT: { label: 'Anonymous Object', icon: '●', color: '#fef3c7', isNode: true },
+  
+  // Relationships
+  LINK: { label: 'Link', icon: '―', color: '#6b7280', isConnection: true },
+  NAMED_LINK: { label: 'Named Link', icon: '―', color: '#4b5563', isConnection: true },
+  DEPENDENCY: { label: 'Dependency', icon: '⇢', color: '#dc2626', isConnection: true }
 };
 
 // Elemente pentru Package Diagram
@@ -636,6 +696,24 @@ const ACTIVITY_ELEMENTS = {
   TRANSITION: { label: 'Transition', icon: '→', color: '#f0f0f0', isConnection: true }
 };
 
+// Elemente pentru Composite Structure Diagram
+const COMPOSITE_STRUCTURE_ELEMENTS = {
+  // Boundary / Container
+  BOUNDARY: { label: 'Class/Component Boundary', icon: '▭', color: '#e0e7ff', isNode: true },
+  
+  // Internal Structure
+  PART: { label: 'Part', icon: '◻', color: '#dbeafe', isNode: true },
+  PORT: { label: 'Port', icon: '■', color: '#f3f4f6', isNode: true },
+  ROLE: { label: 'Role (Text)', icon: '●', color: '#fff4e6', isNode: true },
+  COLLABORATION: { label: 'Collaboration', icon: '◯', color: '#fcd34d', isNode: true },
+  
+  // Connectors
+  CONNECTOR: { label: 'Connector', icon: '―', color: '#6b7280', isConnection: true },
+  DELEGATION_CONNECTOR: { label: 'Delegation Connector', icon: '⇒', color: '#7c3aed', isConnection: true },
+  PROVIDED_IFACE: { label: 'Provided Interface', icon: '●', color: '#84cc16', isConnection: true },
+  REQUIRED_IFACE: { label: 'Required Interface', icon: '⊃', color: '#06b6d4', isConnection: true }
+};
+
 // Elemente pentru State Diagram
 const STATE_ELEMENTS = {
   STATE: { label: 'State', icon: '▭', color: '#fff4e6', isNode: true },
@@ -646,6 +724,7 @@ const STATE_ELEMENTS = {
 
 const UMLEditor = () => {
   const navigate = useNavigate();
+  const { diagramId } = useParams();
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
   const [selectedType, setSelectedType] = useState('CLASS');
@@ -656,6 +735,8 @@ const UMLEditor = () => {
   const [selectedElement, setSelectedElement] = useState(null);
   const [editingElement, setEditingElement] = useState(null);
   const [editName, setEditName] = useState('');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   
   // Pentru mutare elemente pe canvas
   const [movingElement, setMovingElement] = useState(null);
@@ -682,6 +763,49 @@ const UMLEditor = () => {
   // Pentru drag endpoint-uri (start/end points ale conexiunilor)
   const [draggingEndpoint, setDraggingEndpoint] = useState(null); // {connectionId, endpointType: 'from'|'to', startX, startY}
 
+  // Load diagram from database when diagramId is in URL
+  useEffect(() => {
+    if (!diagramId) {
+      setCurrentDiagramId(null);
+      return;
+    }
+
+    setIsLoading(true);
+    const loadDiagram = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/class-diagrams/${diagramId}`);
+        const result = await response.json();
+
+        if (response.ok && result.diagram) {
+          const diagramData = result.diagram.data;
+          setSelectedType(diagramData.selectedType || 'CLASS');
+          setElements(diagramData.elements || []);
+          
+          // Convert waypoints to controlPoints for loaded connections
+          const loadedConnections = (diagramData.connections || []).map(conn => ({
+            ...conn,
+            controlPoints: conn.waypoints || []
+          }));
+          setConnections(loadedConnections);
+          
+          setCurrentDiagramId(result.diagram.id);
+          sessionStorage.setItem('currentDiagramId', result.diagram.id);
+          console.log('Diagram loaded:', result.diagram.title);
+        } else {
+          console.error('Error loading diagram:', result.error);
+          alert('Eroare la încărcarea diagramei: ' + (result.error || 'Necunoscut'));
+        }
+      } catch (error) {
+        console.error('Error fetching diagram:', error);
+        alert('Eroare la încărcarea diagramei: ' + error.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadDiagram();
+  }, [diagramId]);
+
   const getElementsList = () => {
     switch (selectedType) {
       case 'CLASS':
@@ -703,7 +827,7 @@ const UMLEditor = () => {
       case 'STATE':
         return STATE_ELEMENTS;
       case 'COMPOSITE_STRUCTURE':
-        return COMPONENT_ELEMENTS; // refolositm componentele
+        return COMPOSITE_STRUCTURE_ELEMENTS;
       default:
         return CLASS_ELEMENTS;
     }
@@ -829,7 +953,8 @@ const UMLEditor = () => {
           fromPoint: connectionStart.point, // obiect cu {x, y, point, code}
           to: element.id,
           toPoint: clickedPoint, // obiect cu {x, y, point, code}
-          label: getElementsList()[connectionMode].label
+          label: getElementsList()[connectionMode].label,
+          waypoints: [] // Array of intermediate points
         };
         setConnections([...connections, newConnection]);
         setConnectionMode(null);
@@ -1193,6 +1318,101 @@ const UMLEditor = () => {
     a.download = 'uml-diagram.json';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Handler pentru salvare în baza de date
+  // Prepare diagram data for saving
+  const prepareDiagramForSave = () => {
+    // Convert controlPoints to waypoints for consistency
+    return connections.map(conn => ({
+      ...conn,
+      waypoints: conn.controlPoints || conn.waypoints || []
+    }));
+  };
+
+  const handleSaveToDatabase = async () => {
+    const diagramTitle = prompt('Introdu numele diagramei:', 'UML Class Diagram');
+    if (!diagramTitle) return;
+
+    try {
+      // Get user id from localStorage (saved during login)
+      const userId = localStorage.getItem('userId');
+      if (!userId) {
+        alert('Trebuie să fii logat pentru a salva diagrama!');
+        return;
+      }
+
+      // Prepare diagram data with waypoints from controlPoints
+      const diagramData = {
+        title: diagramTitle,
+        userId: parseInt(userId),
+        diagram: {
+          selectedType: selectedType || 'CLASS',
+          elements: elements,
+          connections: prepareDiagramForSave()
+        }
+      };
+
+      // Send to backend
+      const response = await fetch('http://localhost:5000/api/class-diagrams', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(diagramData)
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+        // Store the diagram ID for future updates
+        sessionStorage.setItem('currentDiagramId', result.diagramId);
+      } else {
+        alert(`Eroare: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error saving to database:', error);
+      alert(`Eroare la salvare: ${error.message}`);
+    }
+  };
+
+  // Handler pentru actualizare diagramă în baza de date
+  const handleUpdateInDatabase = async () => {
+    try {
+      const diagramId = sessionStorage.getItem('currentDiagramId');
+      if (!diagramId) {
+        alert('Nu ai o diagramă deschisă pentru actualizare. Salvează mai întâi una nouă.');
+        return;
+      }
+
+      const diagramData = {
+        diagram: {
+          selectedType: selectedType || 'CLASS',
+          elements: elements,
+          connections: prepareDiagramForSave()
+        }
+      };
+
+      const response = await fetch(`http://localhost:5000/api/class-diagrams/${diagramId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(diagramData)
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert('Diagrama a fost actualizată cu succes!');
+      } else {
+        alert(`Eroare: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error updating diagram:', error);
+      alert(`Eroare la actualizare: ${error.message}`);
+    }
   };
 
   // Handler pentru export SVG
@@ -2148,7 +2368,31 @@ const UMLEditor = () => {
   };
 
   return (
-    <div className="uml-editor">
+    <>
+      {isLoading && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          zIndex: 9999
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '2rem',
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <p>Se încarcă diagrama...</p>
+          </div>
+        </div>
+      )}
+      <div className="uml-editor">
       {/* Header */}
       <div className="uml-header">
         <button className="btn-back" onClick={() => navigate('/dashboard')}>
@@ -2156,7 +2400,8 @@ const UMLEditor = () => {
         </button>
         <h1>UML Diagram Editor</h1>
         <div className="header-actions">
-          <button className="btn-primary">Save</button>
+          <button className="btn-primary" onClick={handleSaveToDatabase}>💾 Save to DB</button>
+          <button className="btn-secondary" onClick={handleUpdateInDatabase} title="Update current diagram in database">🔄 Update</button>
           <div className="dropdown-save">
             <button className="btn-secondary">Export ▼</button>
             <div className="dropdown-content">
@@ -2437,11 +2682,56 @@ const UMLEditor = () => {
           {/* Rendered Elements */}
           {elements.map((el) => {
             const isActor = (el.type === 'ACTOR') && (selectedType === 'SEQUENCE' || selectedType === 'USE_CASE');
+            const isSystemActor = (el.type === 'SYSTEM_ACTOR' && selectedType === 'USE_CASE');
+            const isUseCase = (el.type === 'USE_CASE' && selectedType === 'USE_CASE');
+            const isSystemBoundary = (el.type === 'SYSTEM_BOUNDARY' && selectedType === 'USE_CASE');
+            const isNote = (el.type === 'NOTE' && selectedType === 'USE_CASE');
+            const isPackage = (el.type === 'PACKAGE' && selectedType === 'USE_CASE');
+            
             const isControl = (el.type === 'CONTROL' && selectedType === 'SEQUENCE');
             const isAlt = (el.type === 'ALT' && selectedType === 'SEQUENCE');
+            const isOpt = (el.type === 'OPT' && selectedType === 'SEQUENCE');
+            const isPar = (el.type === 'PAR' && selectedType === 'SEQUENCE');
+            const isRef = (el.type === 'REF' && selectedType === 'SEQUENCE');
+            const isEntity = (el.type === 'ENTITY' && selectedType === 'SEQUENCE');
             const isBoundary = (el.type === 'BOUNDARY' && selectedType === 'SEQUENCE');
             const isDestroy = (el.type === 'DESTROY' && selectedType === 'SEQUENCE');
             const isClassType = el.type === 'CLASS' || el.type === 'INTERFACE';
+            const isFrameType = isAlt || isOpt || isPar || isRef || el.type === 'LOOP';
+            const isUseCaseElement = isUseCase || isSystemBoundary || isNote || isPackage;
+            const isComponent = (el.type === 'COMPONENT' && selectedType === 'COMPONENT');
+            const isArtifact = (el.type === 'ARTIFACT' && selectedType === 'COMPONENT');
+            const isPort = (el.type === 'PORT' && selectedType === 'COMPONENT');
+            const isInterfaceComp = (el.type === 'INTERFACE' && selectedType === 'COMPONENT');
+            const isSubsystem = (el.type === 'SUBSYSTEM' && selectedType === 'COMPONENT');
+            const isPackageComp = (el.type === 'PACKAGE_COMP' && selectedType === 'COMPONENT');
+            const isComponentElement = isComponent || isArtifact || isPort || isInterfaceComp || isSubsystem || isPackageComp;
+            
+            // Composite Structure Diagram elements
+            const isCompositeStructure = selectedType === 'COMPOSITE_STRUCTURE';
+            const isCompBoundary = (el.type === 'BOUNDARY' && isCompositeStructure);
+            const isCompPart = (el.type === 'PART' && isCompositeStructure);
+            const isCompPort = (el.type === 'PORT' && isCompositeStructure);
+            const isCompCollaboration = (el.type === 'COLLABORATION' && isCompositeStructure);
+            const isCompRole = (el.type === 'ROLE' && isCompositeStructure);
+            const isCompositeStructureElement = isCompBoundary || isCompPart || isCompPort || isCompCollaboration || isCompRole;
+            
+            // Deployment Diagram elements
+            const isDeploymentDiagram = selectedType === 'DEPLOYMENT';
+            const isDeployNode = (el.type === 'NODE' && isDeploymentDiagram);
+            const isDevice = (el.type === 'DEVICE' && isDeploymentDiagram);
+            const isExecEnv = (el.type === 'EXECUTION_ENVIRONMENT' && isDeploymentDiagram);
+            const isDeployArtifact = (el.type === 'ARTIFACT' && isDeploymentDiagram);
+            const isDeploySpec = (el.type === 'DEPLOYMENT_SPEC' && isDeploymentDiagram);
+            const isDeploymentElement = isDeployNode || isDevice || isExecEnv || isDeployArtifact || isDeploySpec;
+            
+            // Object Diagram elements
+            const isObjectDiagram = selectedType === 'OBJECT';
+            const isObjectInstance = (el.type === 'OBJECT_INSTANCE' && isObjectDiagram);
+            const isAnonymousObject = (el.type === 'ANONYMOUS_OBJECT' && isObjectDiagram);
+            const isObjectElement = isObjectInstance || isAnonymousObject;
+            
+            const isTransparentBG = isActor || isControl || isAlt || isOpt || isPar || isRef || isEntity || isBoundary || isDestroy || isSystemActor || isUseCaseElement || isNote || isComponentElement || isCompositeStructureElement || isDeploymentElement;
 
             return (
               <div
@@ -2453,15 +2743,29 @@ const UMLEditor = () => {
                   top: `${el.y}px`,
                   width: `${el.width}px`,
                   minHeight: `${el.height}px`,
-                  backgroundColor: isActor || isControl || isAlt || isBoundary || isDestroy ? 'transparent' : (isClassType ? '#fffef0' : '#ede9fe'),
+                  backgroundColor: isTransparentBG ? (isNote ? '#fef3c7' : (isPackage ? '#fff4e6' : (isPackageComp ? '#fef3c7' : (isArtifact ? '#fef08a' : (isCompBoundary ? '#e0e7ff' : (isCompPart ? '#dbeafe' : (isCompCollaboration ? '#fcd34d' : (isDeployNode ? '#f0e68c' : (isDevice ? '#fef08a' : (isExecEnv ? '#fed7aa' : (isDeployArtifact ? '#fef08a' : (isDeploySpec ? '#fcd34d' : 'transparent')))))))))))) : (isObjectInstance ? '#fffef0' : (isAnonymousObject ? '#fef3c7' : (isClassType ? '#fffef0' : '#ede9fe'))),
                   color: '#5b21b6',
-                  border: connectionMode 
-                    ? (hoveringConnectionElement === el.id ? '12px solid #ec4899' : '10px dashed #a78bfa')
-                    : (isAlt ? '2px solid #a78bfa' : (isClassType ? '2px solid #a78bfa' : 'none')),
+                  border: (() => {
+                    if (connectionMode) return hoveringConnectionElement === el.id ? '12px solid #ec4899' : '10px dashed #a78bfa';
+                    if (isFrameType || isEntity || isSystemActor || isUseCase || isComponent || isInterfaceComp || isCompPort || isCompRole || isDeployNode || isDevice || isExecEnv) return 'none';
+                    if (isObjectInstance || isAnonymousObject) return '2px solid #7c3aed';
+                    if (isClassType) return '2px solid #a78bfa';
+                    if (isSystemBoundary) return '2px solid #6b7280';
+                    if (isNote) return '1px solid #d97706';
+                    if (isSubsystem) return '2px solid #ca8a04';
+                    if (isPackageComp) return '1.5px solid #ca8a04';
+                    if (isPort) return '1px solid #4b5563';
+                    if (isCompBoundary) return '2px solid #6366f1';
+                    if (isCompPart) return '1.5px solid #0284c7';
+                    if (isCompCollaboration) return '1.5px dashed #ca8a04';
+                    if (isDeployArtifact) return '1.5px solid #f59e0b';
+                    if (isDeploySpec) return '1.5px solid #d97706';
+                    return 'none';
+                  })(),
                   boxShadow: connectionMode && hoveringConnectionElement === el.id
                     ? '0 0 20px rgba(236, 72, 153, 0.6), inset 0 0 10px rgba(236, 72, 153, 0.2)'
-                    : (isActor || isControl || isAlt || isBoundary || isDestroy ? 'none' : undefined),
-                  padding: isActor || isControl || isAlt || isBoundary || isDestroy ? 0 : undefined,
+                    : (isTransparentBG && !isNote && !isPackage && !isPackageComp && !isArtifact && !isCompositeStructureElement && !isDeploymentElement ? 'none' : undefined),
+                  padding: isTransparentBG && !isNote && !isPackage && !isPackageComp && !isArtifact && !isCompositeStructureElement && !isDeploymentElement ? 0 : undefined,
                   transition: 'border 0.15s ease, box-shadow 0.15s ease',
                   cursor: connectionMode ? 'crosshair' : 'move',
                   outline: connectionMode ? '3px solid rgba(236, 72, 153, 0.4)' : 'none',
@@ -2474,7 +2778,7 @@ const UMLEditor = () => {
                 onMouseEnter={() => connectionMode && setHoveringConnectionElement(el.id)}
                 onMouseLeave={() => setHoveringConnectionElement(null)}
               >
-                {(isActor || isControl || isBoundary || isAlt) ? (
+                {(isActor || isSystemActor || isControl || isBoundary) ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
                     {/* Icon actor, control sau boundary */}
                     {isActor ? (
@@ -2667,6 +2971,984 @@ const UMLEditor = () => {
                         />
                       ) : (
                         <div style={{ fontSize: 14, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : el.type === 'OPT' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '1.5px solid #7c3aed', borderRadius: '2px', background: 'transparent', padding: 0 }}>
+                    <div style={{ padding: '2px 6px', background: '#f3e8ff', borderBottom: '1px solid #7c3aed', minHeight: '20px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#7c3aed', fontWeight: 600 }}>opt</span>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            color: '#222',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            marginLeft: '6px',
+                            width: '60%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#222', marginLeft: '6px' }}>[{el.name}]</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : el.type === 'PAR' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '1.5px solid #0369a1', borderRadius: '2px', background: 'transparent', padding: 0 }}>
+                    <div style={{ padding: '2px 6px', background: '#dbeafe', borderBottom: '1px solid #0369a1', minHeight: '20px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#0369a1', fontWeight: 600 }}>par</span>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            color: '#222',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            marginLeft: '6px',
+                            width: '60%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#222', marginLeft: '6px' }}>[{el.name}]</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, borderRight: '1px dashed #0369a1' }} />
+                  </div>
+                ) : el.type === 'REF' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '1.5px solid #9333ea', borderRadius: '2px', background: 'transparent', padding: 0 }}>
+                    <div style={{ padding: '2px 6px', background: '#f3e8ff', borderBottom: '1px solid #9333ea', minHeight: '20px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#9333ea', fontWeight: 600 }}>ref</span>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            color: '#222',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            marginLeft: '6px',
+                            width: '60%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#222', marginLeft: '6px' }}>{el.name}</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : el.type === 'ENTITY' && selectedType === 'SEQUENCE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0 }}>
+                    <div style={{ 
+                      width: '100%', 
+                      height: '100%', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: '2px solid #ca8a04', 
+                      borderRadius: '2px',
+                      background: '#fef3c7'
+                    }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            width: '90%',
+                            fontSize: 14,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 400,
+                            border: 'none',
+                            borderBottom: '2px solid #ca8a04',
+                            background: 'transparent',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{
+                          textAlign: 'center',
+                          fontSize: 14,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 400,
+                          paddingBottom: '6px',
+                          borderBottom: '2px solid #ca8a04',
+                          width: '90%'
+                        }}>
+                          {el.name}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : isUseCase && selectedType === 'USE_CASE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0 }}>
+                    <svg style={{ width: '100%', height: '100%', position: 'absolute' }} viewBox={`0 0 ${el.width || 100} ${el.height || 60}`} preserveAspectRatio="none">
+                      <ellipse cx={`${(el.width || 100) / 2}`} cy={`${(el.height || 60) / 2}`} rx={`${(el.width || 100) / 2 - 2}`} ry={`${(el.height || 60) / 2 - 2}`} fill="#fef3c7" stroke="#ca8a04" strokeWidth="1.5" />
+                    </svg>
+                    <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 13,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            maxWidth: '90%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#222', fontFamily: 'sans-serif', fontWeight: 500, maxWidth: '90%' }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isSystemBoundary && selectedType === 'USE_CASE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '2px solid #6b7280', borderRadius: '2px', background: 'rgba(107, 114, 128, 0.02)', padding: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingBottom: '4px', borderBottom: '1px solid #d1d5db' }}>
+                      <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#4b5563', fontWeight: 600 }}>System</span>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: '12px',
+                            color: '#222',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            marginLeft: '6px',
+                            width: '70%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '12px', color: '#222', marginLeft: '6px', fontWeight: 500 }}>[{el.name}]</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : isNote && selectedType === 'USE_CASE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', position: 'relative' }}>
+                    <svg style={{ width: '100%', height: '100%', position: 'absolute' }} viewBox={`0 0 ${el.width || 100} ${el.height || 60}`} preserveAspectRatio="none">
+                      <path d={`M 10,5 L ${(el.width || 100) - 15},5 L ${(el.width || 100) - 5},15 L ${(el.width || 100) - 5},${(el.height || 60) - 5} L 5,${(el.height || 60) - 5} L 5,5 Z`} fill="#fef3c7" stroke="#d97706" strokeWidth="1" />
+                      <line x1={`${(el.width || 100) - 15}`} y1="5" x2={`${(el.width || 100) - 15}`} y2="15" stroke="#d97706" strokeWidth="1" />
+                      <line x1={`${(el.width || 100) - 15}`} y1="15" x2={`${(el.width || 100) - 5}`} y2="15" stroke="#d97706" strokeWidth="1" />
+                    </svg>
+                    <div style={{ position: 'relative', zIndex: 2, padding: '8px', width: '100%', height: '100%', overflow: 'hidden' }}>
+                      {editingElement === el.id ? (
+                        <textarea
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') handleSaveName();
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: 12,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '100%',
+                            height: '100%',
+                            resize: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isPackage && selectedType === 'USE_CASE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '1.5px solid #ca8a04', borderRadius: '2px', background: 'rgba(254, 243, 199, 0.4)' }}>
+                    <div style={{ padding: '6px 8px', borderBottom: '1px solid #ca8a04', background: '#fff4e6', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#ca8a04', fontWeight: 600 }}>📁</span>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: 12,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            marginLeft: '6px',
+                            width: '80%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span style={{ fontSize: 12, color: '#222', marginLeft: '6px', fontWeight: 500 }}>{el.name}</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : isSystemActor && selectedType === 'USE_CASE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1.5px solid #0284c7', borderRadius: '2px', padding: '4px' }}>
+                    <div style={{ textAlign: 'center', width: '100%' }}>
+                      <div style={{ fontSize: '16px', color: '#0284c7', fontWeight: 600, marginBottom: '4px' }}>■</div>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 11,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '90%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 11, color: '#222', fontFamily: 'monospace', fontWeight: 500, marginBottom: '2px' }}>«system»</div>
+                      )}
+                      <div style={{ fontSize: 11, color: '#222', fontFamily: 'sans-serif' }}>{el.name}</div>
+                    </div>
+                  </div>
+                ) : isComponent && selectedType === 'COMPONENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff4e6', border: '1.5px solid #f59e0b', borderRadius: '2px', position: 'relative', padding: '8px' }}>
+                    {/* Component icon in corner */}
+                    <svg style={{ position: 'absolute', top: '4px', right: '4px', width: '16px', height: '16px' }} viewBox="0 0 16 16">
+                      <rect x="0" y="2" width="12" height="12" fill="none" stroke="#f59e0b" strokeWidth="1" />
+                      <rect x="12" y="4" width="2" height="3" fill="#f59e0b" />
+                      <rect x="12" y="9" width="2" height="3" fill="#f59e0b" />
+                    </svg>
+                    <div style={{ textAlign: 'center', width: '100%' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 13,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '90%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isArtifact && selectedType === 'COMPONENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef08a', border: '1.5px solid #f59e0b', borderRadius: '2px', position: 'relative', padding: '8px' }}>
+                    {/* Document icon in corner */}
+                    <svg style={{ position: 'absolute', top: '4px', right: '4px', width: '18px', height: '18px' }} viewBox="0 0 18 18">
+                      <rect x="1" y="2" width="10" height="14" fill="none" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="4" y1="6" x2="9" y2="6" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="4" y1="9" x2="9" y2="9" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="4" y1="12" x2="7" y2="12" stroke="#f59e0b" strokeWidth="1" />
+                    </svg>
+                    <div style={{ textAlign: 'center', width: '100%' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 13,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '90%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isPort && selectedType === 'COMPONENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', border: '1px solid #4b5563', position: 'relative' }}>
+                    <div style={{ fontSize: 12, color: '#222', fontFamily: 'monospace', fontWeight: 600 }}>P</div>
+                  </div>
+                ) : isInterfaceComp && selectedType === 'COMPONENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', position: 'relative' }}>
+                    <svg style={{ width: '100%', height: '100%', position: 'absolute' }} viewBox={`0 0 ${el.width || 80} ${el.height || 60}`} preserveAspectRatio="none">
+                      <circle cx={`${(el.width || 80) / 2}`} cy={`${(el.height || 60) / 2}`} r={`${Math.min((el.width || 80), (el.height || 60)) / 2 - 2}`} fill="#e0f2fe" stroke="#0284c7" strokeWidth="1.5" />
+                    </svg>
+                    <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 12,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isSubsystem && selectedType === 'COMPONENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'rgba(202, 138, 4, 0.05)', border: '2px solid #ca8a04', borderRadius: '2px', padding: '8px' }}>
+                    <div style={{ paddingBottom: '6px', borderBottom: '1.5px solid #ca8a04', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#ca8a04', fontWeight: 600 }}>«subsystem»</span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 13,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '90%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#222', fontFamily: 'sans-serif', fontWeight: 500, textAlign: 'center' }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isPackageComp && selectedType === 'COMPONENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#fef3c7', border: '1.5px solid #ca8a04', borderRadius: '2px', padding: 0, position: 'relative' }}>
+                    <div style={{ padding: '4px 6px', borderBottom: '1px solid #ca8a04', background: '#fff4e6', display: 'flex', alignItems: 'center', borderRadius: '0 0 0 0' }}>
+                      <span style={{ fontSize: '11px', fontFamily: 'sans-serif', color: '#ca8a04', fontWeight: 600 }}>📦 </span>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: 11,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            marginLeft: '6px',
+                            width: '80%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span style={{ fontSize: 11, color: '#222', marginLeft: '6px', fontWeight: 500 }}>{el.name}</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : isCompBoundary && selectedType === 'COMPOSITE_STRUCTURE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'rgba(224, 231, 255, 0.4)', border: '2px solid #6366f1', borderRadius: '2px', padding: '8px', position: 'relative' }}>
+                    <div style={{ position: 'absolute', top: '4px', left: '4px', fontSize: '11px', fontFamily: 'monospace', color: '#4f46e5', fontWeight: 600 }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: '11px',
+                            color: '#222',
+                            fontFamily: 'monospace',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '70%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span>{el.name}</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : isCompPart && selectedType === 'COMPOSITE_STRUCTURE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#dbeafe', border: '1.5px solid #0284c7', borderRadius: '1px', padding: '6px', position: 'relative' }}>
+                    <div style={{ fontSize: '11px', fontFamily: 'sans-serif', color: '#0c4a6e', fontWeight: 600, paddingBottom: '4px', borderBottom: '1px solid #0284c7' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            fontSize: '11px',
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            width: '90%'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span>{el.name}:Part</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
+                ) : isCompPort && selectedType === 'COMPOSITE_STRUCTURE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', border: '1px solid #4b5563', borderRadius: '1px' }}>
+                    <div style={{ fontSize: '10px', color: '#1f2937', fontFamily: 'monospace', fontWeight: 700, textAlign: 'center' }}>◆</div>
+                  </div>
+                ) : isCompCollaboration && selectedType === 'COMPOSITE_STRUCTURE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1.5px dashed #ca8a04', borderRadius: '50%', position: 'relative' }}>
+                    <svg style={{ width: '100%', height: '100%', position: 'absolute' }} viewBox={`0 0 ${el.width || 80} ${el.height || 60}`} preserveAspectRatio="none">
+                      <ellipse cx={`${(el.width || 80) / 2}`} cy={`${(el.height || 60) / 2}`} rx={`${(el.width || 80) / 2 - 2}`} ry={`${(el.height || 60) / 2 - 2}`} fill="#fcd34d" fillOpacity="0.3" stroke="#ca8a04" strokeWidth="1.5" strokeDasharray="3,2" />
+                    </svg>
+                    <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 12,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isCompRole && selectedType === 'COMPOSITE_STRUCTURE' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none' }}>
+                    <div style={{ textAlign: 'center', fontSize: '12px', color: '#222', fontFamily: 'monospace', fontWeight: 600 }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 12,
+                            color: '#222',
+                            fontFamily: 'monospace',
+                            fontWeight: 600,
+                            border: 'none',
+                            borderBottom: '1px solid #222',
+                            background: 'transparent',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isDeployNode && selectedType === 'DEPLOYMENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0e68c', position: 'relative', perspective: '1000px' }}>
+                    <svg style={{ width: '100%', height: '100%', position: 'absolute' }} viewBox="0 0 100 80" preserveAspectRatio="xMidYMid meet">
+                      {/* 3D Cube (Node) */}
+                      <polygon points="10,20 40,10 70,20 70,50 40,60 10,50" fill="#f0e68c" stroke="#b45309" strokeWidth="2" />
+                      <polygon points="10,20 10,50 40,60 40,30" fill="#f9d49c" stroke="#b45309" strokeWidth="2" />
+                      <polygon points="70,20 70,50 40,60 40,30" fill="#faded4" stroke="#b45309" strokeWidth="2" />
+                    </svg>
+                    <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            fontSize: 12,
+                            color: '#222',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 500,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : isDevice && selectedType === 'DEPLOYMENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef08a', border: '1.5px solid #b45309', borderRadius: '2px', padding: '6px' }}>
+                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#7c2d12', fontWeight: 600, marginBottom: '4px' }}>«device»</div>
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          textAlign: 'center',
+                          fontSize: 12,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 500,
+                          border: 'none',
+                          background: 'transparent',
+                          outline: 'none'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : isExecEnv && selectedType === 'DEPLOYMENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fed7aa', border: '1.5px solid #b45309', borderRadius: '2px', padding: '6px' }}>
+                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#7c2d12', fontWeight: 600, marginBottom: '4px' }}>«exec env»</div>
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          textAlign: 'center',
+                          fontSize: 12,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 500,
+                          border: 'none',
+                          background: 'transparent',
+                          outline: 'none'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', fontWeight: 500 }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : isDeployArtifact && selectedType === 'DEPLOYMENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef08a', border: '1.5px solid #f59e0b', borderRadius: '2px', position: 'relative', padding: '6px' }}>
+                    <svg style={{ position: 'absolute', top: '4px', right: '4px', width: '16px', height: '16px' }} viewBox="0 0 16 16">
+                      <rect x="1" y="2" width="10" height="12" fill="none" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="3" y1="5" x2="9" y2="5" stroke="#f59e0b" strokeWidth="0.8" />
+                      <line x1="3" y1="8" x2="9" y2="8" stroke="#f59e0b" strokeWidth="0.8" />
+                    </svg>
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          textAlign: 'center',
+                          fontSize: 12,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 500,
+                          border: 'none',
+                          background: 'transparent',
+                          outline: 'none',
+                          width: '90%'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#222', fontFamily: 'sans-serif', fontWeight: 500, textAlign: 'center' }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : isDeploySpec && selectedType === 'DEPLOYMENT' ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fcd34d', border: '1.5px solid #d97706', borderRadius: '2px', position: 'relative', padding: '6px' }}>
+                    <div style={{ fontSize: '9px', fontFamily: 'monospace', color: '#92400e', fontWeight: 600, marginBottom: '4px' }}>«deploymentspec»</div>
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          textAlign: 'center',
+                          fontSize: 11,
+                          color: '#222',
+                          fontFamily: 'sans-serif',
+                          fontWeight: 500,
+                          border: 'none',
+                          background: 'transparent',
+                          outline: 'none',
+                          width: '90%'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 11, color: '#222', fontFamily: 'sans-serif', fontWeight: 500, textAlign: 'center' }}>{el.name}</div>
+                    )}
+                  </div>
+                ) : isObjectInstance && selectedType === 'OBJECT' ? (
+                  <div 
+                    className="uml-object-box" 
+                    style={{ 
+                      minHeight: el.height || (() => {
+                        const attrHeight = Math.max(30, (el.attributes?.length || 0) * 20 + 12);
+                        return 36 + attrHeight;
+                      })()
+                    }}
+                  >
+                    <div className="uml-object-header" style={{ borderBottom: '2px solid #7c3aed', paddingBottom: '4px', marginBottom: '8px' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="uml-object-name-input"
+                          style={{
+                            textDecoration: 'underline',
+                            fontWeight: 'bold'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div className="uml-object-name" style={{ textDecoration: 'underline', fontWeight: 'bold', fontSize: '14px', color: '#222' }}>
+                          {el.name} : {el.className || 'Object'}
+                        </div>
+                      )}
+                    </div>
+                    {/* Attributes Section - with values instead of just types */}
+                    <div 
+                      className="uml-object-section uml-object-attributes"
+                      style={{
+                        flex: Math.max(1, el.attributes?.length || 0)
+                      }}
+                      onDoubleClick={(e) => handleAddAttribute(e, el.id)}
+                    >
+                      {(el.attributes || []).length === 0 ? (
+                        <div className="uml-empty-hint">dublu-click pentru atribute</div>
+                      ) : (
+                        el.attributes.map((attr, idx) => (
+                          editingMember?.elementId === el.id && 
+                          editingMember?.type === 'attribute' && 
+                          editingMember?.index === idx ? (
+                            <input
+                              key={idx}
+                              type="text"
+                              value={editMemberValue}
+                              onChange={(e) => setEditMemberValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); handleSaveMember(true); }
+                                if (e.key === 'Escape') { setEditingMember(null); setEditMemberValue(''); }
+                              }}
+                              onBlur={() => handleSaveMember(false)}
+                              autoFocus
+                              className="uml-member-input"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <div 
+                              key={idx} 
+                              className="uml-member"
+                              onDoubleClick={(e) => handleEditMember(e, el.id, 'attribute', idx, attr)}
+                              style={{ fontFamily: 'monospace', fontSize: '13px' }}
+                            >
+                              {attr}
+                            </div>
+                          )
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : isAnonymousObject && selectedType === 'OBJECT' ? (
+                  <div 
+                    className="uml-object-box" 
+                    style={{ 
+                      minHeight: el.height || (() => {
+                        const attrHeight = Math.max(30, (el.attributes?.length || 0) * 20 + 12);
+                        return 36 + attrHeight;
+                      })()
+                    }}
+                  >
+                    <div className="uml-object-header" style={{ borderBottom: '2px solid #ca8a04', paddingBottom: '4px', marginBottom: '8px' }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="uml-object-name-input"
+                          style={{
+                            textDecoration: 'underline',
+                            fontWeight: 'bold'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div className="uml-object-name" style={{ textDecoration: 'underline', fontWeight: 'bold', fontSize: '14px', color: '#222' }}>
+                          : {el.name || 'AnonymousObject'}
+                        </div>
+                      )}
+                    </div>
+                    {/* Attributes Section - anonymous object variant */}
+                    <div 
+                      className="uml-object-section uml-object-attributes"
+                      style={{
+                        flex: Math.max(1, el.attributes?.length || 0)
+                      }}
+                      onDoubleClick={(e) => handleAddAttribute(e, el.id)}
+                    >
+                      {(el.attributes || []).length === 0 ? (
+                        <div className="uml-empty-hint">dublu-click pentru atribute</div>
+                      ) : (
+                        el.attributes.map((attr, idx) => (
+                          editingMember?.elementId === el.id && 
+                          editingMember?.type === 'attribute' && 
+                          editingMember?.index === idx ? (
+                            <input
+                              key={idx}
+                              type="text"
+                              value={editMemberValue}
+                              onChange={(e) => setEditMemberValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); handleSaveMember(true); }
+                                if (e.key === 'Escape') { setEditingMember(null); setEditMemberValue(''); }
+                              }}
+                              onBlur={() => handleSaveMember(false)}
+                              autoFocus
+                              className="uml-member-input"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <div 
+                              key={idx} 
+                              className="uml-member"
+                              onDoubleClick={(e) => handleEditMember(e, el.id, 'attribute', idx, attr)}
+                              style={{ fontFamily: 'monospace', fontSize: '13px' }}
+                            >
+                              {attr}
+                            </div>
+                          )
+                        ))
                       )}
                     </div>
                   </div>
@@ -3153,7 +4435,8 @@ const UMLEditor = () => {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 
