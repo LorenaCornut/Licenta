@@ -11,6 +11,11 @@ exports.saveDiagram = async (req, res) => {
   let { userId, title, tipDiagrama, nodes, edges, elements, connections, diagramData, diagramId } = req.body;
 
   try {
+    // Normalize diagram type names
+    if (tipDiagrama === 'STATE_MACHINE_DIAGRAM') {
+      tipDiagrama = 'Automat - Diagrama Stări';
+    }
+    
     if (!userId || !title) {
       return res.status(400).json({ message: 'Lipsa userId sau title!' });
     }
@@ -130,7 +135,11 @@ exports.saveDiagram = async (req, res) => {
             JSON.stringify({ 
               label: node.name || node.label || '',
               originalId: node.id,
-              type: node.type || 'STATE'
+              type: node.type || 'STATE',
+              stereotype: node.stereotype || '',
+              color: node.color || '#60a5fa',
+              entryAction: node.entryAction || '',
+              exitAction: node.exitAction || ''
             }),
             Math.round(node.x || 0),
             Math.round(node.y || 0),
@@ -151,16 +160,33 @@ exports.saveDiagram = async (req, res) => {
         const idEnd = nodeIdMap[endId];
 
         if (idStart && idEnd) {
-          const labelValue = (edge.label && edge.label.trim() !== '') ? edge.label.trim() : 'ε';
+          const labelValue = (edge.label && edge.label.trim() !== '') ? edge.label.trim() : '';
           
-          // Save complete edge data including loopDirection and routing points
+          // Save complete edge data including loopDirection, type, points, and routing points
           const textData = { 
             label: labelValue,
             from: startId,  // Store original frontend IDs too
-            to: endId
+            to: endId,
+            type: edge.type || 'TRANSITION'  // Store connection type
           };
           if (edge.loopDirection) {
             textData.loopDirection = edge.loopDirection;
+          }
+          // For UML diagrams, save edge/offset information (new format)
+          if (edge.fromEdge) {
+            textData.fromEdge = edge.fromEdge;
+            textData.fromOffset = edge.fromOffset !== undefined ? edge.fromOffset : 0.5;
+          }
+          if (edge.toEdge) {
+            textData.toEdge = edge.toEdge;
+            textData.toOffset = edge.toOffset !== undefined ? edge.toOffset : 0.5;
+          }
+          // Also save connection point information (old format for backward compatibility)
+          if (edge.fromPoint) {
+            textData.fromPoint = edge.fromPoint;
+          }
+          if (edge.toPoint) {
+            textData.toPoint = edge.toPoint;
           }
           
           // Salvează punctele de rută custom (controlPoints sau points)
@@ -264,7 +290,12 @@ exports.loadDiagram = async (req, res) => {
       const element = {
         id: continut.originalId || `node-${component.id_instanta}`,
         name: continut.label || '',
+        label: continut.label || '',
         type: continut.type || 'STATE',
+        stereotype: continut.stereotype || '',
+        color: continut.color || '#60a5fa',
+        entryAction: continut.entryAction || '',
+        exitAction: continut.exitAction || '',
         x: component.x,
         y: component.y,
         width: component.weight,
@@ -292,12 +323,30 @@ exports.loadDiagram = async (req, res) => {
           fromId: startNode.id,
           toId: endNode.id,
           label: text.label || 'ε',
-          type: 'TRANSITION'
+          type: text.type || 'TRANSITION'  // Restore saved connection type
         };
         
         // Restore loopDirection if it was saved
         if (text.loopDirection) {
           connData.loopDirection = text.loopDirection;
+        }
+        
+        // Restore fromPoint and toPoint if they were saved (for UML diagram routing)
+        if (text.fromPoint) {
+          connData.fromPoint = text.fromPoint;
+        }
+        if (text.toPoint) {
+          connData.toPoint = text.toPoint;
+        }
+        
+        // Restore edge/offset information if it was saved (new format)
+        if (text.fromEdge) {
+          connData.fromEdge = text.fromEdge;
+          connData.fromOffset = text.fromOffset !== undefined ? text.fromOffset : 0.5;
+        }
+        if (text.toEdge) {
+          connData.toEdge = text.toEdge;
+          connData.toOffset = text.toOffset !== undefined ? text.toOffset : 0.5;
         }
         
         // Restore routing points (controlPoints) if they were saved

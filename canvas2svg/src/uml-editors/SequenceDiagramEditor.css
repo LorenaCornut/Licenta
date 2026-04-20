@@ -1,0 +1,112 @@
+.resize-handle {
+  position: absolute;
+  background: #7c3aed;
+  border: 2px solid white;
+  border-radius: 2px;
+  z-index: 30;
+}
+
+/* Colțuri */
+.resize-handle.resize-nw,
+.resize-handle.resize-ne,
+.resize-handle.resize-sw,
+.resize-handle.resize-se {
+  width: 10px;
+  height: 10px;
+}
+
+.resize-handle.resize-nw {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+  transform: translate(-50%, -50%);
+}
+
+.resize-handle.resize-ne {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+  transform: translate(50%, -50%);
+}
+
+.resize-handle.resize-sw {
+  bottom: 0;
+  left: 0;
+  cursor: sw-resize;
+  transform: translate(-50%, 50%);
+}
+
+.resize-handle.resize-se {
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
+  transform: translate(50%, 50%);
+}
+
+/* Margini */
+.resize-handle.resize-n,
+.resize-handle.resize-s {
+  width: 20px;
+  height: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.resize-handle.resize-n {
+  top: 0;
+  cursor: n-resize;
+  transform: translate(-50%, -50%);
+}
+
+.resize-handle.resize-s {
+  bottom: 0;
+  cursor: s-resize;
+  transform: translate(-50%, 50%);
+}
+
+.resize-handle.resize-e,
+.resize-handle.resize-w {
+  width: 8px;
+  height: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.resize-handle.resize-e {
+  right: 0;
+  cursor: e-resize;
+  transform: translate(50%, -50%);
+}
+
+.resize-handle.resize-w {
+  left: 0;
+  cursor: w-resize;
+  transform: translate(-50%, -50%);
+}
+
+.resize-handle:hover {
+  background: #5b21b6;
+}
+
+.uml-canvas {
+  position: relative;
+  width: 100%;
+  height: 700px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  overflow: auto;
+  cursor: default;
+}
+
+.uml-canvas.drag-over {
+  background-color: #f0f9ff;
+  border-color: #7c3aed;
+}
+
+.connections-layer {
+  pointer-events: none;
+}
+
+.selected {
+  outline: 2px solid #7c3aed !important;
+}

@@ -393,12 +393,12 @@ function waypointsToPath(points) {
   }
   return d;
 }
-function findPathAroundObstacles(x1, y1, x2, y2, elements, excludeIds = [], targetEdge = null) {
+function findPathAroundObstacles(x1, y1, x2, y2, elements, excludeIds = [], targetEdge = null, ignoreActivationBars = false) {
   const path = [{ x: x1, y: y1 }];
   
-  // Get all obstacles (exclude start and end elements)
+  // Get all obstacles (exclude start and end elements, and optionally ignore ACTIVATION bars)
   const obstacles = elements
-    .filter(el => !excludeIds.includes(el.id))
+    .filter(el => !excludeIds.includes(el.id) && !(ignoreActivationBars && el.type === 'ACTIVATION'))
     .map(el => getElementBounds(el));
 
   // Check if direct path intersects any obstacles
@@ -592,10 +592,6 @@ const SEQUENCE_ELEMENTS = {
   CREATE_MESSAGE: { label: 'Create Message', icon: '⊕', color: '#ddd6fe', isConnection: true },
   DELETE_MESSAGE: { label: 'Delete Message', icon: '✕', color: '#fca5a5', isConnection: true },
   
-  // Generic lines
-  LINE: { label: 'Simple Line', icon: '―', color: '#bbf7d0', isConnection: true },
-  DOTTED_LINE: { label: 'Dotted Line', icon: '╌', color: '#bbf7d0', isConnection: true },
-  
   // Control Structures (Interaction Frames)
   ALT: { label: 'Alt (Alternative)', icon: 'alt', color: '#fff4e6', isNode: true },
   OPT: { label: 'Opt (Optional)', icon: 'opt', color: '#fef3c7', isNode: true },
@@ -727,6 +723,16 @@ const UMLEditor = () => {
   const { diagramId } = useParams();
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+  const endpointDragRef = useRef({ 
+    connectionId: null, 
+    initialFromX: null, 
+    initialFromY: null, 
+    initialToX: null, 
+    initialToY: null, 
+    startMouseX: null, 
+    startMouseY: null, 
+    isStart: null 
+  });
   const [selectedType, setSelectedType] = useState('CLASS');
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
@@ -781,11 +787,8 @@ const UMLEditor = () => {
           setSelectedType(diagramData.selectedType || 'CLASS');
           setElements(diagramData.elements || []);
           
-          // Convert waypoints to controlPoints for loaded connections
-          const loadedConnections = (diagramData.connections || []).map(conn => ({
-            ...conn,
-            controlPoints: conn.waypoints || []
-          }));
+          // Use connections as-is (controlPoints already set from backend)
+          const loadedConnections = (diagramData.connections || []);
           setConnections(loadedConnections);
           
           setCurrentDiagramId(result.diagram.id);
@@ -918,6 +921,71 @@ const UMLEditor = () => {
     
     // Dacă suntem în modul conexiune
     if (connectionMode) {
+      // SPECIAL HANDLING FOR SEQUENCE DIAGRAM MESSAGES - only accept bottom points
+      const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE'];
+      const isSequenceElement = ['ACTOR', 'OBJECT', 'BOUNDARY', 'CONTROL', 'ENTITY'].includes(element.type);
+      
+      if (selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(connectionMode)) {
+        // For Sequence messages, only allow connections from bottom of participant elements
+        if (!isSequenceElement) {
+          console.log("Sequence messages nur auf Participanten erlaubt");
+          return;
+        }
+        
+        // Force to use bottom point for sequence messages
+        const bottomPointX = element.x + element.width / 2;
+        const bottomPointY = element.y + element.height;
+        const clickedPoint = { x: bottomPointX, y: bottomPointY, point: 'bottom', code: 'BM' };
+        
+        if (!connectionStart) {
+          // Select start point
+          setConnectionStart({ elementId: element.id, point: clickedPoint });
+          setHoveringConnectionPoint(null);
+          console.log(`Sequence START point selected: bottom at (${Math.round(clickedPoint.x)}, ${Math.round(clickedPoint.y)})`);
+        } else if (connectionStart.elementId !== element.id) {
+          // Create connection to end point
+          console.log("Creating sequence message connection");
+          const newConnection = {
+            id: Date.now(),
+            type: connectionMode,
+            from: connectionStart.elementId,
+            fromPoint: connectionStart.point,
+            to: element.id,
+            toPoint: clickedPoint,
+            label: getElementsList()[connectionMode].label,
+            controlPoints: [] // NO control points for sequence messages
+          };
+          setConnections([...connections, newConnection]);
+          setConnectionMode(null);
+          setConnectionStart(null);
+          setHoveringConnectionPoint(null);
+          console.log(`Sequence message created: ${connectionStart.elementId} -> ${element.id}`);
+        } else {
+          // Same element - for SELF_MESSAGE
+          if (connectionMode === 'SELF_MESSAGE') {
+            const newConnection = {
+              id: Date.now(),
+              type: connectionMode,
+              from: element.id,
+              fromPoint: clickedPoint,
+              to: element.id,
+              toPoint: clickedPoint,
+              label: getElementsList()[connectionMode].label,
+              controlPoints: []
+            };
+            setConnections([...connections, newConnection]);
+            setConnectionMode(null);
+            setConnectionStart(null);
+            setHoveringConnectionPoint(null);
+            console.log(`Self message created on ${element.id}`);
+          } else {
+            console.log("Same element - click START again to retry");
+          }
+        }
+        return;
+      }
+      
+      // NORMAL HANDLING FOR OTHER DIAGRAM TYPES
       // Obțin înălțimea reală a elementului
       let elementHeight = element.height || 120;
       if (element.type === 'CLASS' || element.type === 'INTERFACE') {
@@ -1239,45 +1307,135 @@ const UMLEditor = () => {
   // Handle dragging of endpoint (start/end points of connections)
   useEffect(() => {
     const handleEndpointMove = (e) => {
-      if (!draggingEndpoint || !canvasRef.current) return;
+      if (!draggingEndpoint || !canvasRef.current || !endpointDragRef.current.connectionId) return;
       
-      const { connectionId, endpointType } = draggingEndpoint;
       const canvasRect = canvasRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - canvasRect.left;
-      const mouseY = e.clientY - canvasRect.top;
+      const currentMouseX = e.clientX - canvasRect.left;
+      const currentMouseY = e.clientY - canvasRect.top;
       
       setConnections(prevConnections => {
-        const conn = prevConnections.find(c => c.id === connectionId);
-        if (!conn) return prevConnections;
-        
-        const element = elements.find(el => el.id === (endpointType === 'from' ? conn.from : conn.to));
-        if (!element) return prevConnections;
-        
-        // Calculate element height
-        let elementHeight = element.height || 120;
-        if (element.type === 'CLASS' || element.type === 'INTERFACE') {
-          const headerHeight = element.type === 'INTERFACE' ? 50 : 36;
-          const attrHeight = Math.max(30, (element.attributes?.length || 0) * 20 + 12);
-          const methodHeight = Math.max(30, (element.methods?.length || 0) * 20 + 12);
-          elementHeight = headerHeight + attrHeight + methodHeight;
-        }
-        
-        // Calculate element bounds
-        const elX = element.x;
-        const elY = element.y;
-        const elW = element.width || 150;
-        const elH = elementHeight;
-        
-        // Use the same helper function as initial placement for consistency
-        const newPoint = findClosestBoundaryPoint(element, elementHeight, mouseX, mouseY, elX, elY);
-        
-        // Update connection
         return prevConnections.map(c => {
-          if (c.id === connectionId) {
-            if (endpointType === 'from') {
-              return { ...c, fromPoint: newPoint };
+          if (c.id === draggingEndpoint.connectionId) {
+            // Check if this is a sequence message
+            const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+            const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(c.type);
+            
+            if (isSequenceMessage) {
+              // For sequence messages: Y-only movement (both endpoints move together)
+              const startMouseY = endpointDragRef.current.startMouseY;
+              const initialFromY = endpointDragRef.current.initialFromY;
+              const initialToY = endpointDragRef.current.initialToY;
+              const deltaY = currentMouseY - startMouseY;
+              
+              return {
+                ...c,
+                fromPoint: { ...c.fromPoint, y: initialFromY + deltaY },
+                toPoint: { ...c.toPoint, y: initialToY + deltaY }
+              };
             } else {
-              return { ...c, toPoint: newPoint };
+              // For class diagrams: Constrain endpoint to element edge (snap to edge)
+              const startMouseX = endpointDragRef.current.startMouseX;
+              const startMouseY = endpointDragRef.current.startMouseY;
+              const deltaX = currentMouseX - startMouseX;
+              const deltaY = currentMouseY - startMouseY;
+              
+              if (draggingEndpoint.isStart) {
+                // Moving start point - constrain to 'from' element edge
+                const fromElementId = c.from;
+                const fromElement = elements.find(el => el.id === fromElementId);
+                
+                if (fromElement) {
+                  // Calculate closest point on element edge to current mouse position
+                  const elemCenterX = fromElement.x + fromElement.width / 2;
+                  const elemCenterY = fromElement.y + getElementHeight(fromElement) / 2;
+                  const newX = endpointDragRef.current.initialFromX + deltaX;
+                  const newY = endpointDragRef.current.initialFromY + deltaY;
+                  
+                  // Calculate distances to each edge
+                  const distTop = Math.abs(newY - fromElement.y);
+                  const distBottom = Math.abs(newY - (fromElement.y + getElementHeight(fromElement)));
+                  const distLeft = Math.abs(newX - fromElement.x);
+                  const distRight = Math.abs(newX - (fromElement.x + fromElement.width));
+                  
+                  const minDist = Math.min(distTop, distBottom, distLeft, distRight);
+                  let constrainedX, constrainedY;
+                  
+                  if (minDist === distTop) {
+                    // Snap to top
+                    constrainedX = Math.max(fromElement.x, Math.min(newX, fromElement.x + fromElement.width));
+                    constrainedY = fromElement.y;
+                  } else if (minDist === distBottom) {
+                    // Snap to bottom
+                    constrainedX = Math.max(fromElement.x, Math.min(newX, fromElement.x + fromElement.width));
+                    constrainedY = fromElement.y + getElementHeight(fromElement);
+                  } else if (minDist === distLeft) {
+                    // Snap to left
+                    constrainedX = fromElement.x;
+                    constrainedY = Math.max(fromElement.y, Math.min(newY, fromElement.y + getElementHeight(fromElement)));
+                  } else {
+                    // Snap to right
+                    constrainedX = fromElement.x + fromElement.width;
+                    constrainedY = Math.max(fromElement.y, Math.min(newY, fromElement.y + getElementHeight(fromElement)));
+                  }
+                  
+                  return {
+                    ...c,
+                    fromPoint: {
+                      ...c.fromPoint,
+                      x: constrainedX,
+                      y: constrainedY
+                    }
+                  };
+                }
+              } else {
+                // Moving end point - constrain to 'to' element edge
+                const toElementId = c.to;
+                const toElement = elements.find(el => el.id === toElementId);
+                
+                if (toElement) {
+                  // Calculate closest point on element edge to current mouse position
+                  const elemCenterX = toElement.x + toElement.width / 2;
+                  const elemCenterY = toElement.y + getElementHeight(toElement) / 2;
+                  const newX = endpointDragRef.current.initialToX + deltaX;
+                  const newY = endpointDragRef.current.initialToY + deltaY;
+                  
+                  // Calculate distances to each edge
+                  const distTop = Math.abs(newY - toElement.y);
+                  const distBottom = Math.abs(newY - (toElement.y + getElementHeight(toElement)));
+                  const distLeft = Math.abs(newX - toElement.x);
+                  const distRight = Math.abs(newX - (toElement.x + toElement.width));
+                  
+                  const minDist = Math.min(distTop, distBottom, distLeft, distRight);
+                  let constrainedX, constrainedY;
+                  
+                  if (minDist === distTop) {
+                    // Snap to top
+                    constrainedX = Math.max(toElement.x, Math.min(newX, toElement.x + toElement.width));
+                    constrainedY = toElement.y;
+                  } else if (minDist === distBottom) {
+                    // Snap to bottom
+                    constrainedX = Math.max(toElement.x, Math.min(newX, toElement.x + toElement.width));
+                    constrainedY = toElement.y + getElementHeight(toElement);
+                  } else if (minDist === distLeft) {
+                    // Snap to left
+                    constrainedX = toElement.x;
+                    constrainedY = Math.max(toElement.y, Math.min(newY, toElement.y + getElementHeight(toElement)));
+                  } else {
+                    // Snap to right
+                    constrainedX = toElement.x + toElement.width;
+                    constrainedY = Math.max(toElement.y, Math.min(newY, toElement.y + getElementHeight(toElement)));
+                  }
+                  
+                  return {
+                    ...c,
+                    toPoint: {
+                      ...c.toPoint,
+                      x: constrainedX,
+                      y: constrainedY
+                    }
+                  };
+                }
+              }
             }
           }
           return c;
@@ -1286,6 +1444,16 @@ const UMLEditor = () => {
     };
     
     const handleEndpointUp = () => {
+      endpointDragRef.current = {
+        connectionId: null,
+        initialFromX: null,
+        initialFromY: null,
+        initialToX: null,
+        initialToY: null,
+        startMouseX: null,
+        startMouseY: null,
+        isStart: null
+      };
       setDraggingEndpoint(null);
     };
     
@@ -1298,7 +1466,7 @@ const UMLEditor = () => {
       window.removeEventListener('mousemove', handleEndpointMove);
       window.removeEventListener('mouseup', handleEndpointUp);
     };
-  }, [draggingEndpoint, elements]);
+  }, [draggingEndpoint, selectedType]);
 
   // Recalculate connection points whenever elements change position or size
   useEffect(() => {
@@ -1324,10 +1492,17 @@ const UMLEditor = () => {
   // Prepare diagram data for saving
   const prepareDiagramForSave = () => {
     // Convert controlPoints to waypoints for consistency
-    return connections.map(conn => ({
-      ...conn,
-      waypoints: conn.controlPoints || conn.waypoints || []
-    }));
+    // For Sequence messages, ALWAYS use empty waypoints (no intermediate points)
+    const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+    
+    return connections.map(conn => {
+      const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type);
+      
+      return {
+        ...conn,
+        waypoints: isSequenceMessage ? [] : (conn.controlPoints || conn.waypoints || [])
+      };
+    });
   };
 
   const handleSaveToDatabase = async () => {
@@ -1474,6 +1649,16 @@ const UMLEditor = () => {
       <marker id='arrowOpen' markerWidth='14' markerHeight='14' refX='13' refY='7' orient='auto'>
         <path d='M 0 0 L 14 7 L 0 14' fill='none' stroke='#8b4513' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>
       </marker>
+      <!-- Markers untuk Sequence Diagram Messages -->
+      <marker id='arrowSyncMessage' markerWidth='14' markerHeight='14' refX='12' refY='7' orient='auto'>
+        <path d='M 0 0 L 14 7 L 0 14 Z' fill='#333' stroke='none'/>
+      </marker>
+      <marker id='arrowAsyncMessage' markerWidth='14' markerHeight='14' refX='13' refY='7' orient='auto'>
+        <path d='M 0 0 L 14 7 L 0 14' fill='none' stroke='#333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>
+      </marker>
+      <marker id='arrowReturnMessage' markerWidth='14' markerHeight='14' refX='13' refY='7' orient='auto'>
+        <path d='M 0 0 L 14 7 L 0 14' fill='none' stroke='#333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>
+      </marker>
     </defs>\n`;
 
     // Funcție pentru calculare puncte conexiuni (suportă toate tipurile de elemente)
@@ -1481,6 +1666,33 @@ const UMLEditor = () => {
       const fromEl = elements.find(el => el.id === conn.from);
       const toEl = elements.find(el => el.id === conn.to);
       if (!fromEl || !toEl) return null;
+      
+      // *** SPECIAL HANDLING FOR SEQUENCE DIAGRAM MESSAGES - ALWAYS HORIZONTAL ***
+      const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+      if (selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type)) {
+        // For sequence messages in SVG, always use horizontal lines from lifeline centers
+        const startX = fromEl.x + (fromEl.width || 150) / 2;
+        const endX = toEl.x + (toEl.width || 150) / 2;
+        
+        let startY, endY;
+        if (conn.fromPoint && typeof conn.fromPoint === 'object' && conn.fromPoint.y !== undefined) {
+          startY = conn.fromPoint.y;
+        } else {
+          startY = fromEl.y + (fromEl.height || 120) / 2;
+        }
+        
+        if (conn.toPoint && typeof conn.toPoint === 'object' && conn.toPoint.y !== undefined) {
+          endY = conn.toPoint.y;
+        } else {
+          endY = startY;
+        }
+        
+        if (conn.type === 'SELF_MESSAGE') {
+          return { startX, startY, endX: startX, endY: startY + 50, targetEdge: 'right' };
+        }
+        
+        return { startX, startY, endX, endY: startY, targetEdge: 'right' };
+      }
       
       // Calculează înălțime reală pe baza tipului
       const getElementHeightForCalc = (el) => {
@@ -1613,8 +1825,19 @@ const UMLEditor = () => {
       
       // Build waypoints - either through control points or direct
       let waypoints;
-      if (conn.controlPoints && conn.controlPoints.length > 0) {
-        // Route through control points in order
+      
+      // For Sequence Diagram messages, use ONLY direct horizontal lines (no routing, no control points)
+      const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+      const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type);
+      
+      if (isSequenceMessage) {
+        // Pure horizontal line - ignore all control points and routing
+        waypoints = [
+          { x: points.startX, y: points.startY },
+          { x: points.endX, y: points.endY }
+        ];
+      } else if (conn.controlPoints && conn.controlPoints.length > 0) {
+        // Route through control points in order (only for non-sequence messages)
         waypoints = [{ x: points.startX, y: points.startY }];
         for (const cp of conn.controlPoints) {
           waypoints.push({ x: cp.x, y: cp.y });
@@ -1622,6 +1845,8 @@ const UMLEditor = () => {
         waypoints.push({ x: points.endX, y: points.endY });
       } else {
         // Find path around obstacles with perpendicular approach based on target edge
+        // For Sequence diagrams, ignore ACTIVATION bars as obstacles
+        const ignoreActivationBars = selectedType === 'SEQUENCE';
         waypoints = findPathAroundObstacles(
           points.startX,
           points.startY,
@@ -1629,11 +1854,12 @@ const UMLEditor = () => {
           points.endY,
           elements,
           [conn.from, conn.to],
-          points.targetEdge
+          points.targetEdge,
+          ignoreActivationBars
         );
       }
       // Use orthogonal routing for control points, obstacle avoidance otherwise
-      const pathD = conn.controlPoints && conn.controlPoints.length > 0 
+      const pathD = conn.controlPoints && conn.controlPoints.length > 0 && !isSequenceMessage
         ? buildOrthogonalPathThroughWaypoints(waypoints) 
         : waypointsToPath(waypoints);
       
@@ -1642,8 +1868,40 @@ const UMLEditor = () => {
       let stroke = '#8b4513';
       let strokeWidth = '2';
       
+      // Sequence Diagram message types
+      if (conn.type === 'SYNC_MESSAGE') {
+        // Synchronous: solid line + filled triangle
+        marker = 'url(#arrowSyncMessage)';
+        strokeDasharray = 'none';
+        stroke = '#333';
+      } else if (conn.type === 'ASYNC_MESSAGE') {
+        // Asynchronous: solid line + open arrow
+        marker = 'url(#arrowAsyncMessage)';
+        strokeDasharray = 'none';
+        stroke = '#333';
+      } else if (conn.type === 'RETURN_MESSAGE') {
+        // Return/Reply: dotted line + open arrow
+        marker = 'url(#arrowReturnMessage)';
+        strokeDasharray = '6,6';
+        stroke = '#333';
+      } else if (conn.type === 'CREATE_MESSAGE') {
+        // Create: solid line + arrow to new object
+        marker = 'url(#arrowAsyncMessage)';
+        strokeDasharray = 'none';
+        stroke = '#333';
+      } else if (conn.type === 'DELETE_MESSAGE') {
+        // Delete: line to X symbol (no marker, X drawn separately)
+        marker = '';
+        strokeDasharray = 'none';
+        stroke = '#333';
+      } else if (conn.type === 'SELF_MESSAGE') {
+        // Self-message: U-shaped loop (handled separately)
+        marker = 'url(#arrowSyncMessage)';
+        strokeDasharray = 'none';
+        stroke = '#333';
+      }
       // Class Diagram connections
-      if (conn.type === 'INHERITANCE') {
+      else if (conn.type === 'INHERITANCE') {
         marker = 'url(#arrowTriangle)';
       } else if (conn.type === 'COMPOSITION') {
         marker = 'url(#arrowDiamond)';
@@ -1662,7 +1920,7 @@ const UMLEditor = () => {
         marker = 'url(#arrowOpen)';
         strokeDasharray = '6,6';
       }
-      // Sequence Diagram connections
+      // Generic Sequence message fallback
       else if (conn.type === 'LINE_ARROW') {
         marker = 'url(#arrowSimple)';
         stroke = '#8b4513';
@@ -1677,14 +1935,45 @@ const UMLEditor = () => {
         stroke = '#8b4513';
       }
       
-      let pathAttrs = `d='${pathD}' stroke='${stroke}' stroke-width='${strokeWidth}' fill='none'`;
-      if (strokeDasharray !== 'none') {
-        pathAttrs += ` stroke-dasharray='${strokeDasharray}'`;
+      // Special handling for self-messages in SVG export
+      if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
+        const startEl = elements.find(el => el.id === conn.from);
+        if (startEl) {
+          const x = startEl.x + startEl.width / 2;
+          const y = startEl.y + startEl.height;
+          const loopWidth = 50;
+          const loopHeight = 30;
+          
+          // U-shaped path: down, right, up (like a loop)
+          const selfPath = `M ${x} ${y} L ${x} ${y + loopHeight} Q ${x + loopWidth} ${y + loopHeight} ${x + loopWidth} ${y} L ${x + loopWidth} ${y}`;
+          
+          let pathAttrs = `d='${selfPath}' stroke='${stroke}' stroke-width='${strokeWidth}' fill='none' marker-end='${marker}'`;
+          svg += `<path ${pathAttrs} />\n`;
+        }
+      } else if (conn.type === 'DELETE_MESSAGE') {
+        // Draw the line
+        let pathAttrs = `d='${pathD}' stroke='${stroke}' stroke-width='${strokeWidth}' fill='none'`;
+        svg += `<path ${pathAttrs} />\n`;
+        
+        // Draw X symbol at the end
+        const endEl = elements.find(el => el.id === conn.to);
+        const endX = endEl ? endEl.x + endEl.width / 2 : points.endX;
+        const endY = endEl ? endEl.y + endEl.height : points.endY;
+        const xSize = 12;
+        
+        svg += `<line x1='${endX - xSize/2}' y1='${endY - xSize/2}' x2='${endX + xSize/2}' y2='${endY + xSize/2}' stroke='${stroke}' stroke-width='2'/>\n`;
+        svg += `<line x1='${endX - xSize/2}' y1='${endY + xSize/2}' x2='${endX + xSize/2}' y2='${endY - xSize/2}' stroke='${stroke}' stroke-width='2'/>\n`;
+      } else {
+        // Normal connection rendering
+        let pathAttrs = `d='${pathD}' stroke='${stroke}' stroke-width='${strokeWidth}' fill='none'`;
+        if (strokeDasharray !== 'none') {
+          pathAttrs += ` stroke-dasharray='${strokeDasharray}'`;
+        }
+        if (marker) {
+          pathAttrs += ` marker-end='${marker}'`;
+        }
+        svg += `<path ${pathAttrs} />\n`;
       }
-      if (marker) {
-        pathAttrs += ` marker-end='${marker}'`;
-      }
-      svg += `<path ${pathAttrs} />\n`;
       
       // Adauga label pentru INCLUDE și EXTEND
       if (conn.type === 'INCLUDE' || conn.type === 'EXTEND') {
@@ -1759,23 +2048,23 @@ const UMLEditor = () => {
           });
         }
       } else if (el.type === 'ACTOR') {
-        // Actor SVG - exact ca în editor
+        // Actor - Stick figure (omuleț)
         const centerX = x + w / 2;
-        const headR = 7;
-        const headY = y + 10;
-        // Centrul pentru scalare
-        svg += `<g transform='translate(${centerX}, ${headY})'>\n`;
-        svg += `<circle cx='0' cy='0' r='${headR}' fill='#f9d6d6' stroke='#222' stroke-width='1.5'/>\n`;
-        svg += `<line x1='0' y1='${headR}' x2='0' y2='${28}' stroke='#222' stroke-width='1.5'/>\n`;
-        svg += `<line x1='-14' y1='${15}' x2='14' y2='${15}' stroke='#222' stroke-width='1.2'/>\n`;
-        svg += `<line x1='0' y1='${28}' x2='-12' y2='${47}' stroke='#222' stroke-width='1.5'/>\n`;
-        svg += `<line x1='0' y1='${28}' x2='12' y2='${47}' stroke='#222' stroke-width='1.5'/>\n`;
-        svg += `</g>\n`;
-        svg += `<text x='${centerX}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        const topY = y + 10;
+        svg += `<circle cx='${centerX}' cy='${topY}' r='8' fill='#f9d6d6' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${centerX}' y1='${topY + 8}' x2='${centerX}' y2='${topY + 32}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${centerX - 16}' y1='${topY + 20}' x2='${centerX + 16}' y2='${topY + 20}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${centerX}' y1='${topY + 32}' x2='${centerX - 15}' y2='${topY + 50}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${centerX}' y1='${topY + 32}' x2='${centerX + 15}' y2='${topY + 50}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<text x='${centerX}' y='${y + h + 8}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
       } else if (el.type === 'OBJECT') {
-        // Object - dreptunghi alb cu border și text centrat
-        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='#ffffff' stroke='#222' stroke-width='1.5' rx='2'/>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 4}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        // Object - Rectangle with dotted lifeline below
+        const rectY = y;
+        const rectH = 30;
+        svg += `<rect x='${x + 10}' y='${rectY}' width='${w - 20}' height='${rectH}' fill='#ffffff' stroke='#222' stroke-width='1.5' rx='2'/>\n`;
+        svg += `<text x='${x + w / 2}' y='${rectY + rectH / 2 + 5}' font-size='12' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        // Dotted lifeline below object
+        svg += `<line x1='${x + w / 2}' y1='${rectY + rectH}' x2='${x + w / 2}' y2='${y + h}' stroke='#999' stroke-width='1' stroke-dasharray='4,4'/>\n`;
       } else if (el.type === 'ACTIVATION') {
         // Activation - linie verticală subțire (6px larg, 80% înălțime)
         const barWidth = 6;
@@ -1791,14 +2080,32 @@ const UMLEditor = () => {
         svg += `<text x='${cx}' y='${cy + 8}' font-size='40' font-family='Arial' text-anchor='middle' fill='#7c3aed' font-weight='bold'>✕</text>\n`;
         svg += `<text x='${cx}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
       } else if (el.type === 'BOUNDARY') {
-        // Boundary - cerc cu text sub
-        const r = Math.min(w / 2, h / 2);
-        svg += `<circle cx='${x + w / 2}' cy='${y + h / 2}' r='${r - 1}' fill='none' stroke='#222' stroke-width='1.5'/>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        // Boundary - Circle with vertical line on left side (like sideways T)
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const r = Math.min(w / 2 - 5, h / 2 - 5);
+        svg += `<circle cx='${cx}' cy='${cy}' r='${r}' fill='none' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${cx - r - 10}' y1='${cy}' x2='${cx - r - 3}' y2='${cy}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${cx - r - 6}' y1='${cy - r - 5}' x2='${cx - r - 6}' y2='${cy + r + 5}' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<text x='${cx}' y='${y + h + 8}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
       } else if (el.type === 'CONTROL') {
-        // Control - emoji ↻ centrat
-        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 12}' font-size='30' font-family='Arial' text-anchor='middle' fill='#222'>↻</text>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + h + 15}' font-size='14' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        // Control - Circle with circular arrow on top
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const r = Math.min(w / 2 - 5, h / 2 - 5);
+        svg += `<circle cx='${cx}' cy='${cy}' r='${r}' fill='none' stroke='#222' stroke-width='1.5'/>\n`;
+        // Circular arrow on top
+        svg += `<path d='M ${cx} ${cy - r - 15} A 8 8 0 0 1 ${cx + 10} ${cy - r - 5}' fill='none' stroke='#222' stroke-width='1.5' stroke-linecap='round'/>\n`;
+        svg += `<polygon points='${cx + 10},${cy - r - 5} ${cx + 13},${cy - r - 10} ${cx + 7},${cy - r - 8}' fill='#222'/>\n`;
+        svg += `<text x='${cx}' y='${y + h + 8}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+      } else if (el.type === 'ENTITY') {
+        // Entity - Circle with horizontal line at base
+        const cx = x + w / 2;
+        const cy = y + 20;
+        const r = 12;
+        svg += `<circle cx='${cx}' cy='${cy}' r='${r}' fill='none' stroke='#222' stroke-width='1.5'/>\n`;
+        svg += `<line x1='${cx - r - 5}' y1='${cy + r + 5}' x2='${cx + r + 5}' y2='${cy + r + 5}' stroke='#222' stroke-width='2'/>\n`;
+        svg += `<text x='${cx}' y='${y + h}' font-size='13' font-family='monospace' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
       } else if (el.type === 'ALT') {
         // ALT - dreptunghi cu border mov și text "alt" în colțul stânga sus
         svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' fill='none' stroke='#a78bfa' stroke-width='2' rx='2'/>\n`;
@@ -1996,7 +2303,29 @@ const UMLEditor = () => {
       
       if (!fromEl || !toEl) return conn;
       
-      // Recalculate cardinal points based on new element dimensions
+      // For Sequence Diagram messages, always use BOTTOM of participants and preserve Y (for dragging)
+      const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+      const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type);
+      
+      if (isSequenceMessage) {
+        // Sequence: Bottom points, preserve existing Y values (they can be moved by dragging)
+        const fromBottomX = fromEl.x + fromEl.width / 2;
+        const fromBottomY = fromEl.y + fromEl.height;
+        
+        const toBottomX = toEl.x + toEl.width / 2;
+        const toBottomY = toEl.y + toEl.height;
+        
+        // Preserve the current Y position if it exists (from dragging), use bottom Y as default
+        const messageY = conn.fromPoint?.y !== undefined ? conn.fromPoint.y : fromBottomY;
+        
+        return {
+          ...conn,
+          fromPoint: { x: fromBottomX, y: messageY, point: 'bottom' },
+          toPoint: { x: toBottomX, y: messageY, point: 'bottom' }
+        };
+      }
+      
+      // Recalculate cardinal points based on new element dimensions (for other diagram types)
       const fromHeight = getElementHeight(fromEl);
       const toHeight = getElementHeight(toEl);
       
@@ -2069,6 +2398,35 @@ const UMLEditor = () => {
     const fromEl = elements.find(el => el.id === conn.from);
     const toEl = elements.find(el => el.id === conn.to);
     if (!fromEl || !toEl) return null;
+
+    // *** SPECIAL HANDLING FOR SEQUENCE DIAGRAM MESSAGES - ALWAYS HORIZONTAL ***
+    const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+    if (selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type)) {
+      // For sequence messages, always use horizontal lines from lifeline centers
+      const startX = fromEl.x + fromEl.width / 2;  // Center of from element (lifeline)
+      const endX = toEl.x + toEl.width / 2;        // Center of to element (lifeline)
+      
+      // Use the Y coordinate from the connection's stored points if available, otherwise use a middle point
+      let startY, endY;
+      if (conn.fromPoint && typeof conn.fromPoint === 'object' && conn.fromPoint.y !== undefined) {
+        startY = conn.fromPoint.y;
+      } else {
+        startY = fromEl.y + fromEl.height / 2;  // Default to middle of element
+      }
+      
+      if (conn.toPoint && typeof conn.toPoint === 'object' && conn.toPoint.y !== undefined) {
+        endY = conn.toPoint.y;
+      } else {
+        endY = startY;  // Keep same Y for horizontal line
+      }
+      
+      // For SELF_MESSAGE, both start and end are the same element center
+      if (conn.type === 'SELF_MESSAGE') {
+        return { startX, startY, endX: startX, endY: startY + 50, targetEdge: 'right' };
+      }
+      
+      return { startX, startY, endX, endY: startY, targetEdge: 'right' };
+    }
 
     let startX, startY, endX, endY, targetEdge;
 
@@ -2255,46 +2613,43 @@ const UMLEditor = () => {
   const handleConnectionLineClick = (e, connId) => {
     e.stopPropagation();
     
+    const conn = connections.find(c => c.id === connId);
+    if (!conn) return;
+    
+    // For Sequence Diagrams, NO intermediate control points allowed
+    const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+    const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type);
+    
     // Detect if user wants to delete (Shift+click) or add control point
     if (e.shiftKey) {
-      const conn = connections.find(c => c.id === connId);
       if (conn && window.confirm(`Șterge conexiunea ${conn.label}?`)) {
         handleDeleteConnection(connId);
       }
-    } else {
-      // Add control point at click location
+    } else if (isSequenceMessage) {
+      // For sequence messages, start drag directly when clicking on the line
       const canvasRect = canvasRef.current.getBoundingClientRect();
-      const clickX = e.clientX - canvasRect.left;
-      const clickY = e.clientY - canvasRect.top;
+      const startMouseY = e.clientY - canvasRect.top;
       
-      // Add new control point
-      const conn = connections.find(c => c.id === connId);
-      if (!conn) return;
-      
-      const newControlPoints = conn.controlPoints ? [...conn.controlPoints] : [];
-      const pointId = Date.now();
-      newControlPoints.push({ x: clickX, y: clickY, id: pointId });
-      
-      // Update connection
-      const updatedConnections = connections.map(c => 
-        c.id === connId 
-          ? { ...c, controlPoints: newControlPoints }
-          : c
-      );
-      setConnections(updatedConnections);
-      
-      // Immediately start dragging the newly added control point
-      const pointIndex = newControlPoints.length - 1;
-      setDraggingControlPoint({
+      // Store initial values in ref for drag calculation
+      endpointDragRef.current = {
         connectionId: connId,
-        pointIndex: pointIndex,
-        startX: clickX,
-        startY: clickY
+        initialFromY: conn.fromPoint.y,
+        initialToY: conn.toPoint.y,
+        startMouseY: startMouseY
+      };
+      
+      setDraggingEndpoint({
+        connectionId: connId,
+        isStart: false // Not dragging from endpoint circle, but from line itself
       });
       
-      // Select this connection for control point editing
       setSelectedConnection(connId);
-      console.log(`Control point adăugat și marcat pentru drag la conexiune ${connId} la (${clickX}, ${clickY})`);
+      console.log(`Sequence message drag initiated from line at ${connId}`);
+    } else {
+      // For other diagrams (Class, etc), just select the connection to show endpoints
+      // Don't add unnecessary control points
+      setSelectedConnection(connId);
+      console.log(`Connection selected: ${connId}`);
     }
   };
 
@@ -2488,7 +2843,19 @@ const UMLEditor = () => {
           )}
 
           {/* SVG pentru conexiuni */}
-          <svg className="connections-layer">
+          <svg 
+            className="connections-layer" 
+            width="100%"
+            height="100%"
+            style={{ 
+              position: 'absolute', 
+              top: 0, 
+              left: 0, 
+              zIndex: 100,
+              pointerEvents: 'auto',
+              overflow: 'visible'
+            }}
+          >
             <defs>
               {/* Arrow pentru inheritance (triunghi gol - UML standard) */}
               <marker id="arrowTriangle" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
@@ -2510,7 +2877,64 @@ const UMLEditor = () => {
               <marker id="arrowOpen" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
                 <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#8b4513" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </marker>
+              
+              {/* Markers pentru Sequence Diagram Messages */}
+              {/* SYNC_MESSAGE - filled triangle (black) */}
+              <marker id="arrowSyncMessage" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
+                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none"/>
+              </marker>
+              
+              {/* ASYNC_MESSAGE - open arrow/chevron */}
+              <marker id="arrowAsyncMessage" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </marker>
+              
+              {/* RETURN_MESSAGE - open arrow (same as async) */}
+              <marker id="arrowReturnMessage" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </marker>
             </defs>
+
+            {/* Lifelines pentru Sequence Diagram participants */}
+            {selectedType === 'SEQUENCE' && elements.map((el) => {
+              const isSequenceParticipant = ['ACTOR', 'OBJECT', 'BOUNDARY', 'CONTROL', 'ENTITY'].includes(el.type);
+              if (!isSequenceParticipant) return null;
+              
+              // Calculate lifeline position: starts from bottom of element
+              const lifelineX = el.x + el.width / 2;
+              const lifelineStartY = el.y + el.height;
+              // Lifeline extends to bottom of canvas or a reasonable distance
+              const canvasHeight = canvasRef?.current?.getBoundingClientRect().height || 1000;
+              const lifelineEndY = canvasHeight;
+              
+              return (
+                <g key={`lifeline-group-${el.id}`}>
+                  {/* Invisible hit area - thicker stroke for easier clicking */}
+                  <line
+                    x1={lifelineX}
+                    y1={lifelineStartY}
+                    x2={lifelineX}
+                    y2={lifelineEndY}
+                    stroke="transparent"
+                    strokeWidth="12"
+                    pointerEvents="stroke"
+                    cursor="pointer"
+                    style={{ opacity: 0 }}
+                  />
+                  {/* Visible dotted lifeline */}
+                  <line
+                    x1={lifelineX}
+                    y1={lifelineStartY}
+                    x2={lifelineX}
+                    y2={lifelineEndY}
+                    stroke="#999"
+                    strokeWidth="1"
+                    strokeDasharray="4,4"
+                    pointerEvents="none"
+                  />
+                </g>
+              );
+            })}
 
             {connections.map((conn) => {
               const points = getConnectionPoints(conn);
@@ -2518,8 +2942,19 @@ const UMLEditor = () => {
 
               // Build waypoints - either through control points or direct
               let waypoints;
-              if (conn.controlPoints && conn.controlPoints.length > 0) {
-                // Route through control points in order
+              
+              // For Sequence Diagram messages, use ONLY direct horizontal lines (no routing, no control points)
+              const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+              const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type);
+              
+              if (isSequenceMessage) {
+                // Pure horizontal line - ignore all control points and routing
+                waypoints = [
+                  { x: points.startX, y: points.startY },
+                  { x: points.endX, y: points.endY }
+                ];
+              } else if (conn.controlPoints && conn.controlPoints.length > 0) {
+                // Route through control points in order (only for non-sequence messages)
                 waypoints = [{ x: points.startX, y: points.startY }];
                 for (const cp of conn.controlPoints) {
                   waypoints.push({ x: cp.x, y: cp.y });
@@ -2527,6 +2962,8 @@ const UMLEditor = () => {
                 waypoints.push({ x: points.endX, y: points.endY });
               } else {
                 // Find path around obstacles with perpendicular approach based on target edge
+                // For Sequence diagrams, ignore ACTIVATION bars as obstacles
+                const ignoreActivationBars = selectedType === 'SEQUENCE';
                 waypoints = findPathAroundObstacles(
                   points.startX,
                   points.startY,
@@ -2534,11 +2971,12 @@ const UMLEditor = () => {
                   points.endY,
                   elements,
                   [conn.from, conn.to],
-                  points.targetEdge
+                  points.targetEdge,
+                  ignoreActivationBars
                 );
               }
               // Use orthogonal routing for control points, obstacle avoidance otherwise
-              const pathD = conn.controlPoints && conn.controlPoints.length > 0 
+              const pathD = conn.controlPoints && conn.controlPoints.length > 0 && !isSequenceMessage
                 ? buildOrthogonalPathThroughWaypoints(waypoints) 
                 : waypointsToPath(waypoints);
 
@@ -2622,7 +3060,110 @@ const UMLEditor = () => {
                 );
               }
 
-              // Stiluri pentru Sequence Diagram și alte tipuri custom
+              // Stiluri pentru Sequence Diagram messages și alte tipuri custom
+              if (selectedType === 'SEQUENCE') {
+                let stroke = '#333';
+                let strokeDasharray = 'none';
+                let marker = '';
+                
+                if (conn.type === 'SYNC_MESSAGE') {
+                  // Synchronous: solid line + filled triangle
+                  strokeDasharray = 'none';
+                  marker = 'url(#arrowSyncMessage)';
+                } else if (conn.type === 'ASYNC_MESSAGE') {
+                  // Asynchronous: solid line + open arrow
+                  strokeDasharray = 'none';
+                  marker = 'url(#arrowAsyncMessage)';
+                } else if (conn.type === 'RETURN_MESSAGE') {
+                  // Return/Reply: dotted line + open arrow
+                  strokeDasharray = '6,6';
+                  marker = 'url(#arrowReturnMessage)';
+                } else if (conn.type === 'CREATE_MESSAGE') {
+                  // Create: solid line + arrow to new object
+                  strokeDasharray = 'none';
+                  marker = 'url(#arrowAsyncMessage)';
+                } else if (conn.type === 'DELETE_MESSAGE') {
+                  // Delete: line to X symbol
+                  strokeDasharray = 'none';
+                  marker = '';
+                } else if (conn.type === 'SELF_MESSAGE') {
+                  // Self-message: U-shaped loop - handled separately below
+                  strokeDasharray = 'none';
+                  marker = 'url(#arrowSyncMessage)';
+                }
+                
+                // Special handling for self-messages (loops)
+                if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
+                  const startEl = elements.find(el => el.id === conn.from);
+                  if (startEl) {
+                    // Draw U-shaped loop from activation bar
+                    const x = startEl.x + startEl.width / 2;
+                    const y = startEl.y + startEl.height;
+                    const loopWidth = 50;
+                    const loopHeight = 30;
+                    
+                    // U-shaped path: down, right, up (like a loop)
+                    const selfPath = `M ${x} ${y} L ${x} ${y + loopHeight} Q ${x + loopWidth} ${y + loopHeight} ${x + loopWidth} ${y} L ${x + loopWidth} ${y}`;
+                    
+                    return (
+                      <g key={conn.id} className="connection-group">
+                        <path
+                          d={selfPath}
+                          fill="none"
+                          stroke={stroke}
+                          strokeWidth="2"
+                          strokeDasharray={strokeDasharray}
+                          markerEnd={marker}
+                          className="connection-line"
+                          onMouseDown={(e) => handleConnectionLineClick(e, conn.id)}
+                        />
+                      </g>
+                    );
+                  }
+                }
+                
+                // Special handling for delete messages (X at end)
+                if (conn.type === 'DELETE_MESSAGE') {
+                  const endEl = elements.find(el => el.id === conn.to);
+                  const endX = endEl ? endEl.x + endEl.width / 2 : points.endX;
+                  const endY = endEl ? endEl.y + endEl.height : points.endY;
+                  const xSize = 12;
+                  
+                  return (
+                    <g key={conn.id} className="connection-group">
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={stroke}
+                        strokeWidth="2"
+                        strokeDasharray={strokeDasharray}
+                        className="connection-line"
+                        onMouseDown={(e) => handleConnectionLineClick(e, conn.id)}
+                      />
+                      {/* X symbol for destroy */}
+                      <line x1={endX - xSize/2} y1={endY - xSize/2} x2={endX + xSize/2} y2={endY + xSize/2} stroke={stroke} strokeWidth="2"/>
+                      <line x1={endX - xSize/2} y1={endY + xSize/2} x2={endX + xSize/2} y2={endY - xSize/2} stroke={stroke} strokeWidth="2"/>
+                    </g>
+                  );
+                }
+                
+                return (
+                  <g key={conn.id} className="connection-group">
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth="2"
+                      strokeDasharray={strokeDasharray}
+                      markerEnd={marker}
+                      className="connection-line"
+                      onMouseDown={(e) => handleConnectionLineClick(e, conn.id)}
+                    />
+                  </g>
+                );
+              }
+              
+              // Generic fallback for other diagram types
               let stroke = '#8b4513';
               let strokeDasharray = 'none';
               let marker = '';
@@ -2668,12 +3209,84 @@ const UMLEditor = () => {
               const toX = conn.toPoint.x;
               const toY = conn.toPoint.y;
               
+              // Check if this is a sequence message
+              const sequenceMessageTypes = ['SYNC_MESSAGE', 'ASYNC_MESSAGE', 'RETURN_MESSAGE', 'CREATE_MESSAGE', 'DELETE_MESSAGE', 'SELF_MESSAGE'];
+              const isSequenceMessage = selectedType === 'SEQUENCE' && sequenceMessageTypes.includes(conn.type);
+              
+              const handleEndpointMouseDown = (e, isStart) => {
+                e.stopPropagation();
+                
+                const canvasRect = canvasRef.current.getBoundingClientRect();
+                
+                if (isSequenceMessage) {
+                  // Sequence messages: Y-only dragging (both endpoints move synchronized)
+                  const startMouseY = e.clientY - canvasRect.top;
+                  endpointDragRef.current = {
+                    connectionId: conn.id,
+                    initialFromY: conn.fromPoint.y,
+                    initialToY: conn.toPoint.y,
+                    startMouseY: startMouseY
+                  };
+                  
+                  setDraggingEndpoint({
+                    connectionId: conn.id,
+                    isStart: isStart
+                  });
+                } else {
+                  // Class Diagrams: Allow free dragging to reposition endpoint
+                  const startMouseX = e.clientX - canvasRect.left;
+                  const startMouseY = e.clientY - canvasRect.top;
+                  
+                  endpointDragRef.current = {
+                    connectionId: conn.id,
+                    initialFromX: conn.fromPoint.x,
+                    initialFromY: conn.fromPoint.y,
+                    initialToX: conn.toPoint.x,
+                    initialToY: conn.toPoint.y,
+                    startMouseX: startMouseX,
+                    startMouseY: startMouseY,
+                    isStart: isStart
+                  };
+                  
+                  setDraggingEndpoint({
+                    connectionId: conn.id,
+                    isStart: isStart
+                  });
+                }
+              };
+              
               return (
                 <g key={`endpoints-${conn.id}`}>
                   {/* Start point - red dot */}
-                  <circle cx={fromX} cy={fromY} r="6" fill="#ff6b6b" stroke="#333" strokeWidth="1" />
+                  <circle 
+                    cx={fromX} 
+                    cy={fromY} 
+                    r="6" 
+                    fill="#ff6b6b" 
+                    stroke="#333" 
+                    strokeWidth="1"
+                    style={{ 
+                      cursor: 'grab',
+                      opacity: 1,
+                      pointerEvents: 'auto'
+                    }}
+                    onMouseDown={(e) => handleEndpointMouseDown(e, true)}
+                  />
                   {/* End point - cyan dot */}
-                  <circle cx={toX} cy={toY} r="6" fill="#4ecdc4" stroke="#333" strokeWidth="1" />
+                  <circle 
+                    cx={toX} 
+                    cy={toY} 
+                    r="6" 
+                    fill="#4ecdc4" 
+                    stroke="#333" 
+                    strokeWidth="1"
+                    style={{ 
+                      cursor: 'grab',
+                      opacity: 1,
+                      pointerEvents: 'auto'
+                    }}
+                    onMouseDown={(e) => handleEndpointMouseDown(e, false)}
+                  />
                 </g>
               );
             })}
@@ -2778,21 +3391,38 @@ const UMLEditor = () => {
                 onMouseEnter={() => connectionMode && setHoveringConnectionElement(el.id)}
                 onMouseLeave={() => setHoveringConnectionElement(null)}
               >
-                {(isActor || isSystemActor || isControl || isBoundary) ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
-                    {/* Icon actor, control sau boundary */}
+                {(isActor || isSystemActor || isControl || isBoundary || isEntity) ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%', background: 'none', boxShadow: 'none', border: 'none', padding: 0, overflow: 'visible' }}>
+                    {/* Icon actor, control, boundary sau entity */}
                     {isActor ? (
-                      <svg width="38" height="60" viewBox="0 0 38 60" style={{ marginTop: 6 }}>
-                        <circle cx="19" cy="10" r="7" fill="#f9d6d6" stroke="#222" strokeWidth="1.5" />
-                        <line x1="19" y1="17" x2="19" y2="38" stroke="#222" strokeWidth="1.5" />
-                        <line x1="5" y1="25" x2="33" y2="25" stroke="#222" strokeWidth="1.2" />
-                        <line x1="19" y1="38" x2="7" y2="57" stroke="#222" strokeWidth="1.5" />
-                        <line x1="19" y1="38" x2="31" y2="57" stroke="#222" strokeWidth="1.5" />
+                      // Actor - Stick figure (omuleț)
+                      <svg width="40" height="65" viewBox="0 0 40 65" style={{ marginTop: 4, overflow: 'visible' }}>
+                        <circle cx="20" cy="10" r="8" fill="#f9d6d6" stroke="#222" strokeWidth="1.5" />
+                        <line x1="20" y1="18" x2="20" y2="40" stroke="#222" strokeWidth="1.5" />
+                        <line x1="4" y1="28" x2="36" y2="28" stroke="#222" strokeWidth="1.5" />
+                        <line x1="20" y1="40" x2="5" y2="60" stroke="#222" strokeWidth="1.5" />
+                        <line x1="20" y1="40" x2="35" y2="60" stroke="#222" strokeWidth="1.5" />
                       </svg>
                     ) : isControl ? (
-                      <div style={{ fontSize: 32, marginTop: 6 }}>↻</div>
+                      // Control - Circle with circular arrow on top
+                      <svg width="50" height="65" viewBox="0 0 50 65" style={{ marginTop: 4 }}>
+                        <circle cx="25" cy="30" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
+                        <path d="M 25 8 A 8 8 0 0 1 32 12" fill="none" stroke="#222" strokeWidth="1.5" strokeLinecap="round" />
+                        <polygon points="32,12 35,8 33,18" fill="#222" />
+                      </svg>
                     ) : isBoundary ? (
-                      <div style={{ fontSize: 32, marginTop: 6 }}>◯</div>
+                      // Boundary - Circle with vertical line on the left (like a T sideways)
+                      <svg width="50" height="65" viewBox="0 0 50 65" style={{ marginTop: 4 }}>
+                        <circle cx="30" cy="30" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
+                        <line x1="12" y1="30" x2="18" y2="30" stroke="#222" strokeWidth="1.5" />
+                        <line x1="15" y1="18" x2="15" y2="42" stroke="#222" strokeWidth="1.5" />
+                      </svg>
+                    ) : isEntity ? (
+                      // Entity - Circle with horizontal line at base
+                      <svg width="50" height="65" viewBox="0 0 50 65" style={{ marginTop: 4 }}>
+                        <circle cx="25" cy="25" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
+                        <line x1="13" y1="40" x2="37" y2="40" stroke="#222" strokeWidth="2" />
+                      </svg>
                     ) : null}
                     {/* Nume sub icon */}
                     {editingElement === el.id ? (
@@ -2808,12 +3438,12 @@ const UMLEditor = () => {
                         autoFocus
                         className="inline-edit"
                         style={{
-                          marginTop: 8,
+                          marginTop: 6,
                           textAlign: 'center',
                           width: '90%',
-                          fontSize: 15,
+                          fontSize: 14,
                           color: '#222',
-                          fontFamily: 'sans-serif',
+                          fontFamily: 'monospace',
                           fontWeight: 400,
                           border: 'none',
                           borderRadius: 0,
@@ -2824,7 +3454,7 @@ const UMLEditor = () => {
                         onClick={(e) => e.stopPropagation()}
                       />
                     ) : (
-                      <div style={{ marginTop: 8, fontSize: 15, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
+                      <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace', fontWeight: 400 }}>{el.name}</div>
                     )}
                   </div>
                 ) : el.type === 'DESTROY' && selectedType === 'SEQUENCE' ? (
@@ -2867,38 +3497,72 @@ const UMLEditor = () => {
                     <div style={{ width: '6px', height: '80%', background: '#e5e7eb', borderRadius: '3px', border: 'none' }} />
                   </div>
                 ) : el.type === 'OBJECT' && selectedType === 'SEQUENCE' ? (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
-                    {editingElement === el.id ? (
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveName();
-                          if (e.key === 'Escape') setEditingElement(null);
-                        }}
-                        onBlur={handleSaveName}
-                        autoFocus
-                        className="inline-edit"
-                        style={{
-                          marginTop: 0,
-                          textAlign: 'center',
-                          width: '90%',
-                          fontSize: 15,
-                          color: '#222',
-                          fontFamily: 'sans-serif',
-                          fontWeight: 400,
-                          border: 'none',
-                          borderRadius: 0,
-                          background: 'transparent',
-                          boxShadow: 'none',
-                          outline: 'none'
-                        }}
-                        onClick={(e) => e.stopPropagation()}
+                  <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', background: 'none', boxShadow: 'none', border: 'none', padding: 0 }}>
+                    {/* Object Rectangle (lifeline header) */}
+                    <div style={{
+                      width: '90%',
+                      padding: '6px 4px',
+                      border: '2px solid #222',
+                      borderRadius: '2px',
+                      background: '#ffffff',
+                      textAlign: 'center',
+                      boxSizing: 'border-box'
+                    }}>
+                      {editingElement === el.id ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveName();
+                            if (e.key === 'Escape') setEditingElement(null);
+                          }}
+                          onBlur={handleSaveName}
+                          autoFocus
+                          className="inline-edit"
+                          style={{
+                            textAlign: 'center',
+                            width: '100%',
+                            fontSize: 13,
+                            color: '#222',
+                            fontFamily: 'monospace',
+                            fontWeight: 400,
+                            border: 'none',
+                            borderRadius: 0,
+                            background: 'transparent',
+                            boxShadow: 'none',
+                            outline: 'none'
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace', fontWeight: 400 }}>{el.name}</div>
+                      )}
+                    </div>
+                    
+                    {/* Dotted lifeline below object (extends to bottom) */}
+                    <svg 
+                      style={{ 
+                        position: 'absolute',
+                        top: '30px',
+                        left: 0,
+                        width: '100%',
+                        height: `${Math.max(el.height - 35, 50)}px`,
+                        pointerEvents: 'none',
+                        overflow: 'visible'
+                      }}
+                      viewBox={`0 0 ${el.width} ${Math.max(el.height - 35, 50)}`}
+                    >
+                      <line 
+                        x1={`${el.width / 2}`} 
+                        y1="0" 
+                        x2={`${el.width / 2}`} 
+                        y2={`${Math.max(el.height - 35, 50)}`}
+                        stroke="#999" 
+                        strokeWidth="1" 
+                        strokeDasharray="4,4"
                       />
-                    ) : (
-                      <div style={{ fontSize: 15, color: '#222', textAlign: 'center', fontFamily: 'sans-serif', fontWeight: 400 }}>{el.name}</div>
-                    )}
+                    </svg>
                   </div>
                 ) : el.type === 'ALT' && selectedType === 'SEQUENCE' ? (
                   <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', border: '2px solid #a78bfa', borderRadius: '2px', background: 'transparent', padding: 0 }}>
@@ -3077,59 +3741,46 @@ const UMLEditor = () => {
                     <div style={{ flex: 1 }} />
                   </div>
                 ) : el.type === 'ENTITY' && selectedType === 'SEQUENCE' ? (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0 }}>
-                    <div style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      border: '2px solid #ca8a04', 
-                      borderRadius: '2px',
-                      background: '#fef3c7'
-                    }}>
-                      {editingElement === el.id ? (
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveName();
-                            if (e.key === 'Escape') setEditingElement(null);
-                          }}
-                          onBlur={handleSaveName}
-                          autoFocus
-                          className="inline-edit"
-                          style={{
-                            textAlign: 'center',
-                            width: '90%',
-                            fontSize: 14,
-                            color: '#222',
-                            fontFamily: 'sans-serif',
-                            fontWeight: 400,
-                            border: 'none',
-                            borderBottom: '2px solid #ca8a04',
-                            background: 'transparent',
-                            outline: 'none'
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <div style={{
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', background: 'transparent', border: 'none', padding: 0, overflow: 'visible' }}>
+                    {/* Entity - Circle with horizontal line at base */}
+                    <svg width="70" height="75" viewBox="0 0 70 75" style={{ marginTop: 2, overflow: 'visible' }}>
+                      {/* Circle */}
+                      <circle cx="35" cy="25" r="18" fill="none" stroke="#222" strokeWidth="1.5" />
+                      {/* Horizontal line at base */}
+                      <line x1="17" y1="45" x2="53" y2="45" stroke="#222" strokeWidth="2" />
+                    </svg>
+                    {/* Nume sub icon */}
+                    {editingElement === el.id ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveName();
+                          if (e.key === 'Escape') setEditingElement(null);
+                        }}
+                        onBlur={handleSaveName}
+                        autoFocus
+                        className="inline-edit"
+                        style={{
+                          marginTop: 2,
                           textAlign: 'center',
-                          fontSize: 14,
+                          width: '90%',
+                          fontSize: 13,
                           color: '#222',
-                          fontFamily: 'sans-serif',
+                          fontFamily: 'monospace',
                           fontWeight: 400,
-                          paddingBottom: '6px',
-                          borderBottom: '2px solid #ca8a04',
-                          width: '90%'
-                        }}>
-                          {el.name}
-                        </div>
-                      )}
-                    </div>
+                          border: 'none',
+                          borderRadius: 0,
+                          background: 'transparent',
+                          boxShadow: 'none',
+                          outline: 'none'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div style={{ marginTop: 2, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace', fontWeight: 400 }}>{el.name}</div>
+                    )}
                   </div>
                 ) : isUseCase && selectedType === 'USE_CASE' ? (
                   <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0 }}>

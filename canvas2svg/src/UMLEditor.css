@@ -219,6 +219,40 @@
   text-align: left;
 }
 
+.connection-type {
+  cursor: pointer !important;
+}
+
+.connection-type:active {
+  cursor: pointer !important;
+}
+
+.connection-hint {
+  font-size: 11px;
+  color: #9f7aea;
+  background: #f3e8ff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.diagram-info {
+  padding: 12px 16px;
+  background: #f3e8ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #5b21b6;
+  margin-top: 16px;
+}
+
+.diagram-info p {
+  margin: 4px 0;
+  font-weight: 600;
+}
+
 /* Canvas Area */
 .uml-canvas {
   flex: 1;
@@ -521,7 +555,7 @@
 }
 
 .connection-line {
-  pointer-events: stroke;
+  pointer-events: none;
   cursor: pointer;
   stroke-width: 2;
   transition: stroke 0.2s, stroke-width 0.2s;
@@ -576,6 +610,12 @@
 .uml-element.connection-source {
   border-color: #f59e0b;
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3), 0 4px 16px rgba(245, 158, 11, 0.2);
+}
+
+.uml-element.connection-available {
+  border-color: #06b6d4;
+  border-width: 3px;
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.3), 0 0 20px rgba(6, 182, 212, 0.4);
 }
 
 .uml-element.moving {
@@ -882,8 +922,8 @@
 .resize-handle {
   position: absolute;
   background: #7c3aed;
-  border: 2px solid white;
-  border-radius: 2px;
+  border: none;
+  border-radius: 0px;
   z-index: 30;
 }
 
@@ -892,68 +932,68 @@
 .resize-handle.resize-ne,
 .resize-handle.resize-sw,
 .resize-handle.resize-se {
-  width: 10px;
-  height: 10px;
+  width: 3px;
+  height: 3px;
 }
 
 .resize-handle.resize-nw {
-  top: -5px;
-  left: -5px;
+  top: -1px;
+  left: -1px;
   cursor: nw-resize;
 }
 
 .resize-handle.resize-ne {
-  top: -5px;
-  right: -5px;
+  top: -1px;
+  right: -1px;
   cursor: ne-resize;
 }
 
 .resize-handle.resize-sw {
-  bottom: -5px;
-  left: -5px;
+  bottom: -1px;
+  left: -1px;
   cursor: sw-resize;
 }
 
 .resize-handle.resize-se {
-  bottom: -5px;
-  right: -5px;
+  bottom: -1px;
+  right: -1px;
   cursor: se-resize;
 }
 
 /* Margini */
 .resize-handle.resize-n,
 .resize-handle.resize-s {
-  width: 20px;
-  height: 8px;
+  width: 6px;
+  height: 3px;
   left: 50%;
   transform: translateX(-50%);
 }
 
 .resize-handle.resize-n {
-  top: -4px;
+  top: -1px;
   cursor: n-resize;
 }
 
 .resize-handle.resize-s {
-  bottom: -4px;
+  bottom: -1px;
   cursor: s-resize;
 }
 
 .resize-handle.resize-e,
 .resize-handle.resize-w {
-  width: 8px;
-  height: 20px;
+  width: 3px;
+  height: 6px;
   top: 50%;
   transform: translateY(-50%);
 }
 
 .resize-handle.resize-e {
-  right: -4px;
+  right: -1px;
   cursor: e-resize;
 }
 
 .resize-handle.resize-w {
-  left: -4px;
+  left: -1px;
   cursor: w-resize;
 }
 
@@ -995,4 +1035,138 @@
 }
 .dropdown-save .dropdown-content button:hover {
   background: #ede9fe;
+}
+
+/* ==================== MODAL DIALOG STYLES ==================== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.modal-dialog {
+  background: white;
+  padding: 28px 32px;
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(91, 33, 182, 0.2);
+  min-width: 420px;
+  max-width: 500px;
+}
+
+.modal-dialog h2 {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  color: #5b21b6;
+  font-weight: 700;
+}
+
+.modal-dialog label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: #5b21b6;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid #ddd6fe;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #5b21b6;
+  background: #f9f5ff;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+  background: white;
+}
+
+.modal-error {
+  color: #b91c1c;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: #fee2e2;
+  border-left: 3px solid #dc2626;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-buttons .btn-secondary {
+  flex: 0;
+}
+
+.modal-buttons .btn-primary {
+  flex: 0;
+}
+
+/* ==================== ELEMENT TEXT EDIT TEXTAREA ==================== */
+.element-text-edit {
+  position: fixed;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 2px solid #7c3aed;
+  border-radius: 6px;
+  background: white;
+  color: #5b21b6;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  box-shadow: 0 4px 16px rgba(91, 33, 182, 0.15);
+  z-index: 1000;
+  min-width: 100px;
+  max-width: 250px;
+  resize: both;
+  overflow: auto;
+}
+
+.element-text-edit:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2), 0 4px 16px rgba(91, 33, 182, 0.2);
+}
+
+/* ==================== PROPERTIES PANEL DELETE BTN ==================== */
+.btn-delete {
+  width: 100%;
+  padding: 12px;
+  background: #fee2e2;
+  color: #dc2626;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  transition: all 0.3s ease;
+}
+
+.btn-delete:hover {
+  background: #fecaca;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.15);
+  transform: translateY(-1px);
+}
+
+.btn-delete:active {
+  transform: translateY(0);
 }

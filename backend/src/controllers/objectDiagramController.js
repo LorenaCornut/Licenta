@@ -2,7 +2,6 @@ const pool = require('../db');
 
 /**
  * Helper function to safely parse JSON fields
- * PostgreSQL JSONB can return as object or string depending on driver
  */
 function safeJsonParse(value) {
   if (!value) return {};
@@ -14,57 +13,18 @@ function safeJsonParse(value) {
       return {};
     }
   }
-  // Already an object
   return value;
 }
 
 /**
- * Map frontend selectedType to database diagram type name
- */
-function selectedTypeToDbType(selectedType) {
-  const typeMap = {
-    'CLASS': 'UML_CLASS_DIAGRAM',
-    'SEQUENCE': 'UML_SEQUENCE_DIAGRAM',
-    'USE_CASE': 'UML_USE_CASE_DIAGRAM',
-    'COMPONENT': 'UML_COMPONENT_DIAGRAM',
-    'DEPLOYMENT': 'UML_DEPLOYMENT_DIAGRAM',
-    'OBJECT': 'UML_OBJECT_DIAGRAM',
-    'PACKAGE': 'UML_PACKAGE_DIAGRAM',
-    'ACTIVITY': 'UML_ACTIVITY_DIAGRAM',
-    'STATE': 'UML_STATE_DIAGRAM',
-    'COMPOSITE_STRUCTURE': 'UML_COMPOSITE_STRUCTURE_DIAGRAM'
-  };
-  return typeMap[selectedType] || 'UML_CLASS_DIAGRAM';
-}
-
-/**
- * Map database diagram type name back to frontend selectedType
- */
-function dbTypeToSelectedType(dbType) {
-  const typeMap = {
-    'UML_CLASS_DIAGRAM': 'CLASS',
-    'UML_SEQUENCE_DIAGRAM': 'SEQUENCE',
-    'UML_USE_CASE_DIAGRAM': 'USE_CASE',
-    'UML_COMPONENT_DIAGRAM': 'COMPONENT',
-    'UML_DEPLOYMENT_DIAGRAM': 'DEPLOYMENT',
-    'UML_OBJECT_DIAGRAM': 'OBJECT',
-    'UML_PACKAGE_DIAGRAM': 'PACKAGE',
-    'UML_ACTIVITY_DIAGRAM': 'ACTIVITY',
-    'UML_STATE_DIAGRAM': 'STATE',
-    'UML_COMPOSITE_STRUCTURE_DIAGRAM': 'COMPOSITE_STRUCTURE'
-  };
-  return typeMap[dbType] || 'CLASS';
-}
-
-/**
- * Save UML Class Diagram to database
+ * Save UML Object Diagram to database
  * Body: {
  *   title: string,
  *   userId: number,
  *   diagram: { selectedType, elements, connections }
  * }
  */
-exports.saveClassDiagram = async (req, res) => {
+exports.saveObjectDiagram = async (req, res) => {
   const client = await pool.connect();
   
   try {
@@ -74,23 +34,22 @@ exports.saveClassDiagram = async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: title, userId, diagram' });
     }
 
-    const { selectedType, elements, connections } = diagram;
+    const { elements, connections } = diagram;
 
     await client.query('BEGIN');
 
-    // 1. Get or create diagram type based on selectedType
-    const dbType = selectedTypeToDbType(selectedType);
+    // Get or create diagram type
     const typeResult = await client.query(
       `INSERT INTO tipuri_diagrame (nume_tip) 
        VALUES ($1) 
        ON CONFLICT (nume_tip) DO UPDATE SET nume_tip = EXCLUDED.nume_tip
        RETURNING id_tip`,
-      [dbType]
+      ['UML_OBJECT_DIAGRAM']
     );
 
     const idTip = typeResult.rows[0].id_tip;
 
-    // 2. Insert into 'diagrame' table
+    // Insert into 'diagrame' table
     const diagramResult = await client.query(
       `INSERT INTO diagrame (id_user, titlu, id_tip, data_create, data_update)
        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -98,15 +57,12 @@ exports.saveClassDiagram = async (req, res) => {
       [userId, title, idTip]
     );
 
-    const idDiagrama = diagramResult.rows[0]?.id_diagrama;
-    if (!idDiagrama) {
-      throw new Error('Failed to create diagram');
-    }
+    const idDiagrama = diagramResult.rows[0].id_diagrama;
 
-    // 3. Get or create a generic component type for class diagrams
+    // Get or create a generic component type for object diagrams
     const componentResult = await client.query(
       `INSERT INTO componente_diagrame (id_tip, nume_componenta, specificatii)
-       VALUES ($1, 'UML_CLASS', '{"type": "class", "description": "UML Class Element"}')
+       VALUES ($1, 'UML_OBJECT', '{"type": "object", "description": "UML Object Instance"}')
        ON CONFLICT DO NOTHING
        RETURNING id_componenta`,
       [idTip]
@@ -114,20 +70,19 @@ exports.saveClassDiagram = async (req, res) => {
 
     let idComponenta = componentResult.rows[0]?.id_componenta;
     
-    // If it already exists, get the ID
     if (!idComponenta) {
       const existingComponent = await client.query(
         `SELECT id_componenta FROM componente_diagrame 
-         WHERE id_tip = $1 AND nume_componenta = 'UML_CLASS' LIMIT 1`,
+         WHERE id_tip = $1 AND nume_componenta = 'UML_OBJECT' LIMIT 1`,
         [idTip]
       );
       idComponenta = existingComponent.rows[0]?.id_componenta;
     }
 
-    // 4. Get or create a generic relationship type for class diagrams
+    // Get or create a generic relationship type for object diagrams
     const relationshipResult = await client.query(
       `INSERT INTO legaturi_diagrame (id_tip, nume_legatura, specificatii)
-       VALUES ($1, 'UML_ASSOCIATION', '{"type": "association", "description": "UML Class Relationship"}')
+       VALUES ($1, 'UML_LINK', '{"type": "link", "description": "UML Object Link"}')
        ON CONFLICT DO NOTHING
        RETURNING id_legatura`,
       [idTip]
@@ -138,13 +93,13 @@ exports.saveClassDiagram = async (req, res) => {
     if (!idLegatura) {
       const existingRelationship = await client.query(
         `SELECT id_legatura FROM legaturi_diagrame 
-         WHERE id_tip = $1 AND nume_legatura = 'UML_ASSOCIATION' LIMIT 1`,
+         WHERE id_tip = $1 AND nume_legatura = 'UML_LINK' LIMIT 1`,
         [idTip]
       );
       idLegatura = existingRelationship.rows[0]?.id_legatura;
     }
 
-    // 5. Insert elements (componente_existente)
+    // Insert elements (componente_existente)
     const elementMap = {}; // Map element.id -> database id_instanta
     
     for (const element of elements) {
@@ -167,7 +122,7 @@ exports.saveClassDiagram = async (req, res) => {
       elementMap[element.id] = elementResult.rows[0].id_instanta;
     }
 
-    // 6. Insert connections (legaturi_existente)
+    // Insert connections (legaturi_existente)
     for (const connection of connections) {
       const idStart = elementMap[connection.from];
       const idEnd = elementMap[connection.to];
@@ -203,15 +158,14 @@ exports.saveClassDiagram = async (req, res) => {
 
     await client.query('COMMIT');
 
-    res.json({
-      success: true,
-      message: 'Diagram saved successfully',
-      diagramId: idDiagrama
+    res.json({ 
+      diagramId: idDiagrama,
+      message: 'Object diagram saved successfully'
     });
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error saving diagram:', error);
+    console.error('Error saving object diagram:', error);
     res.status(500).json({ error: error.message });
   } finally {
     client.release();
@@ -219,14 +173,13 @@ exports.saveClassDiagram = async (req, res) => {
 };
 
 /**
- * Get UML Class Diagram from database
- * Returns: { selectedType, elements, connections }
+ * Get specific UML Object Diagram
  */
-exports.getClassDiagram = async (req, res) => {
+exports.getObjectDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
 
-    // Get diagram metadata (including type)
+    // Get diagram metadata
     const diagramResult = await pool.query(
       `SELECT d.id_diagrama, d.titlu, d.id_user, d.data_create, d.data_update, t.nume_tip
        FROM diagrame d
@@ -236,7 +189,7 @@ exports.getClassDiagram = async (req, res) => {
     );
 
     if (diagramResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Diagram not found' });
+      return res.status(404).json({ error: 'Object diagram not found' });
     }
 
     const diagram = diagramResult.rows[0];
@@ -253,9 +206,8 @@ exports.getClassDiagram = async (req, res) => {
     const elementMap = {};
     const elements = elementsResult.rows.map(row => {
       const element = safeJsonParse(row.continut);
-      elementMap[row.id_instanta] = element.id; // Map DB id -> element id
+      elementMap[row.id_instanta] = element.id;
       
-      // Ensure position and size are set from DB
       element.x = row.x;
       element.y = row.y;
       element.width = row.weight;
@@ -278,7 +230,7 @@ exports.getClassDiagram = async (req, res) => {
       const waypoints = safeJsonParse(row.puncte_intermediare || '[]');
       
       return {
-        id: row.id_instanta,  // ← ADD: Connection ID from database
+        id: row.id_instanta,
         from: elementMap[row.id_start],
         to: elementMap[row.id_end],
         type: connectionData.type,
@@ -289,37 +241,35 @@ exports.getClassDiagram = async (req, res) => {
         fromOffset: typeof connectionData.fromOffset === 'number' ? connectionData.fromOffset : 0.5,
         toEdge: connectionData.toEdge,
         toOffset: typeof connectionData.toOffset === 'number' ? connectionData.toOffset : 0.5,
-        controlPoints: waypoints  // Frontend uses controlPoints, not waypoints
+        controlPoints: waypoints
       };
     });
 
     res.json({
-      success: true,
       diagram: {
         id: diagram.id_diagrama,
-        title: diagram.titlu,
         userId: diagram.id_user,
-        createdAt: diagram.data_create,
-        updatedAt: diagram.data_update,
-        type: diagram.nume_tip,
+        title: diagram.titlu,
         data: {
-          selectedType: dbTypeToSelectedType(diagram.nume_tip),
-          elements,
-          connections
-        }
+          elements: elements,
+          connections: connections
+        },
+        createdAt: diagram.data_create,
+        updatedAt: diagram.data_update
       }
     });
 
   } catch (error) {
-    console.error('Error fetching diagram:', error);
+    console.error('Error fetching object diagram:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
 /**
- * Update UML Class Diagram (replace entire content)
+ * Update UML Object Diagram
+ * Body: { diagram: { elements, connections } }
  */
-exports.updateClassDiagram = async (req, res) => {
+exports.updateObjectDiagram = async (req, res) => {
   const client = await pool.connect();
   
   try {
@@ -327,73 +277,52 @@ exports.updateClassDiagram = async (req, res) => {
     const { diagram } = req.body;
 
     if (!diagram) {
-      return res.status(400).json({ error: 'Missing diagram data' });
+      return res.status(400).json({ error: 'Missing diagram in request body' });
     }
 
-    const { selectedType, elements, connections } = diagram;
+    const { elements, connections } = diagram;
 
     await client.query('BEGIN');
 
-    // Get or create the correct diagram type based on selectedType
-    const dbType = selectedTypeToDbType(selectedType);
-    const newTypeResult = await client.query(
-      `INSERT INTO tipuri_diagrame (nume_tip) 
-       VALUES ($1) 
-       ON CONFLICT (nume_tip) DO UPDATE SET nume_tip = EXCLUDED.nume_tip
-       RETURNING id_tip`,
-      [dbType]
-    );
-
-    const newIdTip = newTypeResult.rows[0].id_tip;
-
-    // Get or update the diagram type if it changed
-    const currentTypeResult = await client.query(
-      'SELECT id_tip FROM diagrame WHERE id_diagrama = $1',
+    // Get current diagram to verify it exists and get type info
+    const diagramCheck = await client.query(
+      `SELECT id_tip FROM diagrame WHERE id_diagrama = $1`,
       [diagramId]
     );
 
-    if (currentTypeResult.rows.length === 0) {
-      throw new Error('Diagram not found');
+    if (diagramCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Object diagram not found' });
     }
 
-    const idTip = newIdTip;
+    const idTip = diagramCheck.rows[0].id_tip;
 
-    // Update diagram type if it changed
-    if (currentTypeResult.rows[0].id_tip !== idTip) {
-      await client.query(
-        'UPDATE diagrame SET id_tip = $1, data_update = CURRENT_TIMESTAMP WHERE id_diagrama = $2',
-        [idTip, diagramId]
-      );
-    } else {
-      // Just update timestamp
-      await client.query(
-        'UPDATE diagrame SET data_update = CURRENT_TIMESTAMP WHERE id_diagrama = $1',
-        [diagramId]
-      );
-    }
-
-    // Get or create component and relationship IDs for this type
+    // Get component and relationship type IDs
     const componentResult = await client.query(
       `SELECT id_componenta FROM componente_diagrame 
-       WHERE id_tip = $1 LIMIT 1`,
+       WHERE id_tip = $1 AND nume_componenta = 'UML_OBJECT' LIMIT 1`,
       [idTip]
     );
-
-    let idComponenta = componentResult.rows[0]?.id_componenta;
 
     const relationshipResult = await client.query(
       `SELECT id_legatura FROM legaturi_diagrame 
-       WHERE id_tip = $1 LIMIT 1`,
+       WHERE id_tip = $1 AND nume_legatura = 'UML_LINK' LIMIT 1`,
       [idTip]
     );
 
-    let idLegatura = relationshipResult.rows[0]?.id_legatura;
+    if (componentResult.rows.length === 0 || relationshipResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Component or relationship type not found for diagram' });
+    }
 
-    // Delete old elements and connections
+    const idComponenta = componentResult.rows[0].id_componenta;
+    const idLegatura = relationshipResult.rows[0].id_legatura;
+
+    // Delete old connections and elements
     await client.query('DELETE FROM legaturi_existente WHERE id_diagrama = $1', [diagramId]);
     await client.query('DELETE FROM componente_existente WHERE id_diagrama = $1', [diagramId]);
 
-    // Reinsert elements
+    // Insert new elements
     const elementMap = {};
     
     for (const element of elements) {
@@ -416,12 +345,15 @@ exports.updateClassDiagram = async (req, res) => {
       elementMap[element.id] = elementResult.rows[0].id_instanta;
     }
 
-    // Reinsert connections
+    // Insert new connections
     for (const connection of connections) {
       const idStart = elementMap[connection.from];
       const idEnd = elementMap[connection.to];
 
-      if (!idStart || !idEnd) continue;
+      if (!idStart || !idEnd) {
+        console.warn(`Skipping connection: from=${connection.from} (${idStart}), to=${connection.to} (${idEnd})`);
+        continue;
+      }
 
       await client.query(
         `INSERT INTO legaturi_existente
@@ -442,21 +374,27 @@ exports.updateClassDiagram = async (req, res) => {
             toEdge: connection.toEdge,
             toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5
           }),
-          JSON.stringify(connection.controlPoints || connection.waypoints || [])
+          JSON.stringify(connection.waypoints || [])
         ]
       );
     }
 
+    // Update diagram timestamp
+    await client.query(
+      `UPDATE diagrame SET data_update = CURRENT_TIMESTAMP WHERE id_diagrama = $1`,
+      [diagramId]
+    );
+
     await client.query('COMMIT');
 
-    res.json({
-      success: true,
-      message: 'Diagram updated successfully'
+    res.json({ 
+      message: 'Object diagram updated successfully',
+      diagramId: diagramId
     });
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error updating diagram:', error);
+    console.error('Error updating object diagram:', error);
     res.status(500).json({ error: error.message });
   } finally {
     client.release();
@@ -464,52 +402,56 @@ exports.updateClassDiagram = async (req, res) => {
 };
 
 /**
- * Delete UML Class Diagram
+ * Delete UML Object Diagram
  */
-exports.deleteClassDiagram = async (req, res) => {
+exports.deleteObjectDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
 
     const result = await pool.query(
-      'DELETE FROM diagrame WHERE id_diagrama = $1 AND id_user = $2',
-      [diagramId, req.user?.id] // Ensure user can only delete their own diagrams
+      `DELETE FROM diagrame
+       WHERE id_diagrama = $1 AND id_tip = (SELECT id_tip FROM tipuri_diagrame WHERE nume_tip = 'UML_OBJECT_DIAGRAM')
+       RETURNING id_diagrama`,
+      [diagramId]
     );
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Diagram not found or no permission' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Object diagram not found' });
     }
 
-    res.json({ success: true, message: 'Diagram deleted' });
+    res.json({ message: 'Object diagram deleted successfully' });
 
   } catch (error) {
-    console.error('Error deleting diagram:', error);
+    console.error('Error deleting object diagram:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
 /**
- * List all UML Diagrams for a user (all types)
+ * List all UML Object Diagrams for a user
  */
-exports.listClassDiagrams = async (req, res) => {
+exports.listObjectDiagrams = async (req, res) => {
   try {
     const { userId } = req.params;
 
     const result = await pool.query(
-      `SELECT d.id_diagrama, d.titlu, d.data_create, d.data_update, t.nume_tip
-       FROM diagrame d
-       LEFT JOIN tipuri_diagrame t ON d.id_tip = t.id_tip
-       WHERE d.id_user = $1
-       ORDER BY d.data_update DESC`,
+      `SELECT 
+        id_diagrama,
+        titlu,
+        data_create,
+        data_update
+       FROM diagrame
+       WHERE id_user = $1 AND id_tip = (SELECT id_tip FROM tipuri_diagrame WHERE nume_tip = 'UML_OBJECT_DIAGRAM')
+       ORDER BY data_update DESC`,
       [userId]
     );
 
     res.json({
-      success: true,
       diagrams: result.rows
     });
 
   } catch (error) {
-    console.error('Error listing diagrams:', error);
+    console.error('Error listing object diagrams:', error);
     res.status(500).json({ error: error.message });
   }
 };

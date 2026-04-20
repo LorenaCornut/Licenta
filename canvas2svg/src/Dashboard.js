@@ -35,6 +35,10 @@ function Dashboard() {
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const searchBoxRef = useRef(null);
 
+  // State pentru UML Type Selector Modal
+  const [showUMLTypeModal, setShowUMLTypeModal] = useState(false);
+  const umlModalRef = useRef(null);
+
   // Fetch profile picture la mount
   useEffect(() => {
     if (userId) {
@@ -129,7 +133,25 @@ function Dashboard() {
     // Navighează la editorul corespunzător tipului
     const type = diagram.nume_tip?.toLowerCase() || '';
     
-    if (type.includes('neorientat')) {
+    if (type.includes('class')) {
+      navigate(`/uml-editor/class/${diagram.id_diagrama}`);
+    } else if (type.includes('sequence')) {
+      navigate(`/uml-editor/sequence/${diagram.id_diagrama}`);
+    } else if (type.includes('use case') || type.includes('use_case')) {
+      navigate(`/uml-editor/usecase/${diagram.id_diagrama}`);
+    } else if (type.includes('component')) {
+      navigate(`/uml-editor/component/${diagram.id_diagrama}`);
+    } else if (type.includes('deployment')) {
+      navigate(`/uml-editor/deployment/${diagram.id_diagrama}`);
+    } else if (type.includes('activity')) {
+      navigate(`/uml-editor/activity/${diagram.id_diagrama}`);
+    } else if (type.includes('object')) {
+      navigate(`/uml-editor/object/${diagram.id_diagrama}`);
+    } else if (type.includes('state machine') || type.includes('state_machine')) {
+      navigate(`/uml-editor/state-machine/${diagram.id_diagrama}`);
+    } else if (type.includes('state') || type.includes('automat')) {
+      navigate(`/uml-editor/state-machine/${diagram.id_diagrama}`);
+    } else if (type.includes('neorientat')) {
       navigate(`/graph/${diagram.id_diagrama}`);
     } else if (type.includes('orientat')) {
       navigate(`/orientedgraph/${diagram.id_diagrama}`);
@@ -137,8 +159,6 @@ function Dashboard() {
       navigate(`/uml/${diagram.id_diagrama}`);
     } else if (type.includes('petri')) {
       navigate(`/petrinet/${diagram.id_diagrama}`);
-    } else if (type.includes('state') || type.includes('automat')) {
-      navigate(`/state/${diagram.id_diagrama}`);
     } else {
       // Default: graf neorientat
       navigate(`/graph/${diagram.id_diagrama}`);
@@ -346,6 +366,46 @@ function Dashboard() {
     navigate('/');
   }
 
+  // Handler pentru selectarea unui tip UML
+  function handleUMLTypeSelect(type) {
+    setShowUMLTypeModal(false);
+    setShowMenu(false);
+    switch(type) {
+      case 'CLASS':
+        navigate('/uml-editor/class/new');
+        break;
+      case 'SEQUENCE':
+        navigate('/uml-editor/sequence/new');
+        break;
+      case 'USE_CASE':
+        navigate('/uml-editor/usecase/new');
+        break;
+      case 'COMPONENT':
+        navigate('/uml-editor/component/new');
+        break;
+      case 'DEPLOYMENT':
+        navigate('/uml-editor/deployment/new');
+        break;
+      case 'STATE':
+        navigate('/uml-editor/state-machine/new');
+        break;
+      case 'ACTIVITY':
+        navigate('/uml-editor/activity/new');
+        break;
+      case 'OBJECT':
+        navigate('/uml-editor/object/new');
+        break;
+      case 'COMPOSITE_STRUCTURE':
+        navigate('/uml-editor/composite/new');
+        break;
+      case 'STATE_MACHINE':
+        navigate('/uml-editor/state-machine/new');
+        break;
+      default:
+        navigate('/uml');
+    }
+  }
+
   return (
     <div className="dashboard-root">
       <aside className="dashboard-sidebar">
@@ -373,7 +433,7 @@ function Dashboard() {
             <div className="create-menu-dropdown" ref={menuRef}>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/orientedgraph'); }}>Graf orientat</button>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/graph'); }}>Graf neorientat</button>
-              <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/uml'); }}>UML</button>
+              <button className="create-menu-btn" onClick={() => { setShowUMLTypeModal(true); }}>UML</button>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/petrinet'); }}>Rețea Petri</button>
               <button className="create-menu-btn" onClick={() => { setShowMenu(false); navigate('/state'); }}>Automat</button>
             </div>
@@ -623,6 +683,126 @@ function Dashboard() {
         )}
         {/* Butoanele Istoric și Șabloane eliminate */}
       </main>
+      
+      {/* Modal UML Type Selector */}
+      {showUMLTypeModal && (
+        <div 
+          className="uml-type-modal-overlay"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+          onClick={() => setShowUMLTypeModal(false)}
+        >
+          <div 
+            ref={umlModalRef}
+            className="uml-type-modal"
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 40px rgba(91, 33, 182, 0.15)',
+              padding: '32px',
+              maxWidth: '800px',
+              width: '90%',
+              maxHeight: '80vh',
+              overflowY: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ marginBottom: '24px' }}>
+              <h2 style={{ color: '#3c1a6e', fontSize: '1.5rem', marginBottom: '8px' }}>
+                Ce fel de diagramă UML vrei să creezi?
+              </h2>
+              <p style={{ color: '#8b5cf6', fontSize: '0.95rem' }}>
+                Alege tipul de diagramă din opțiunile de mai jos
+              </p>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+              gap: '12px',
+              marginBottom: '24px'
+            }}>
+              {[
+                { type: 'CLASS', label: '📦 Class', icon: '📦' },
+                { type: 'SEQUENCE', label: '🔄 Sequence', icon: '🔄' },
+                { type: 'USE_CASE', label: '⭕ Use Case', icon: '⭕' },
+                { type: 'COMPONENT', label: '🧩 Component', icon: '🧩' },
+                { type: 'DEPLOYMENT', label: '🖥️ Deployment', icon: '🖥️' },
+                { type: 'STATE', label: '🔀 State', icon: '🔀' },
+                { type: 'ACTIVITY', label: '⚡ Activity', icon: '⚡' },
+                { type: 'OBJECT', label: '🎯 Object', icon: '🎯' },
+                { type: 'COMPOSITE_STRUCTURE', label: '🧩 Composite', icon: '🧩' }
+              ].map((item) => (
+                <button
+                  key={item.type}
+                  onClick={() => handleUMLTypeSelect(item.type)}
+                  style={{
+                    padding: '16px 12px',
+                    border: '2px solid #e9d5ff',
+                    backgroundColor: 'white',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    color: '#3c1a6e',
+                    fontWeight: 600,
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3e8ff';
+                    e.target.style.borderColor = '#8b5cf6';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'white';
+                    e.target.style.borderColor = '#e9d5ff';
+                  }}
+                >
+                  <span style={{ fontSize: '1.5rem' }}>{item.icon}</span>
+                  <span>{item.label.split(' ')[1]}</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setShowUMLTypeModal(false)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                backgroundColor: '#f3e8ff',
+                color: '#5b21b6',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.95rem',
+                fontWeight: 500,
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#ede9fe';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#f3e8ff';
+              }}
+            >
+              Anulează
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Buton help/FAQ/AI tool dreapta jos */}
       <button className="dashboard-help-btn" aria-label="Ajutor" style={{ position: 'fixed', right: '32px', bottom: '32px', zIndex: 200 }}>
         <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
