@@ -68,6 +68,7 @@ function App() {
         <Route path="/uml-editor/state/:diagramId" element={<StateDiagramEditor />} />
         <Route path="/uml-editor/activity/:diagramId" element={<ActivityDiagramEditor />} />
         <Route path="/uml-editor/object/:diagramId" element={<ObjectDiagramEditor />} />
+        <Route path="/uml-editor/composite" element={<CompositeStructureDiagramEditor />} />
         <Route path="/uml-editor/composite/:diagramId" element={<CompositeStructureDiagramEditor />} />
         <Route path="/uml-editor/state-machine" element={<StateMachineDiagramEditor />} />
         <Route path="/uml-editor/state-machine/:diagramId" element={<StateMachineDiagramEditor />} />

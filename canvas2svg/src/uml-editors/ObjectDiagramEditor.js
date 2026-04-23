@@ -437,12 +437,15 @@ function ObjectDiagramEditor() {
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
   const endpointDragRef = useRef(null);
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
 
   const elementsList = OBJECT_ELEMENTS;
 
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
+    } else {
+      setCurrentDiagramId(null);
     }
   }, [diagramId]);
 
@@ -475,6 +478,7 @@ function ObjectDiagramEditor() {
         setTitle(result.diagram.title || 'Untitled Diagram');
         setElements(result.diagram.data.elements || []);
         setConnections(result.diagram.data.connections || []);
+        setCurrentDiagramId(result.diagram.id);
         sessionStorage.setItem('currentDiagramId', result.diagram.id);
       } else {
         console.error('Invalid response format:', result);
@@ -938,36 +942,74 @@ function ObjectDiagramEditor() {
     });
   };
 
-  const handleSaveToDatabase = async () => {
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
-    
-    // If diagram is already saved, just update it without asking
-    if (currentDiagramId) {
-      try {
-        const diagramData = {
-          diagram: {
-            selectedType: 'OBJECT',
-            elements: elements,
-            connections: prepareDiagramForSave()
-          }
-        };
+  const saveDiagram = async ({ diagramTitle, diagramIdToUpdate = null }) => {
+    const userId = localStorage.getItem('userId');
 
-        const response = await fetch(`http://localhost:5000/api/object-diagrams/${currentDiagramId}`, {
+    try {
+      const diagramData = {
+        diagram: {
+          selectedType: 'OBJECT',
+          elements: elements,
+          connections: prepareDiagramForSave()
+        }
+      };
+
+      let response;
+
+      if (diagramIdToUpdate) {
+        response = await fetch(`http://localhost:5000/api/object-diagrams/${diagramIdToUpdate}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(diagramData)
         });
+      } else {
+        const newDiagramData = {
+          title: diagramTitle,
+          userId: parseInt(userId),
+          ...diagramData
+        };
 
-        const result = await response.json();
+        response = await fetch('http://localhost:5000/api/object-diagrams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newDiagramData)
+        });
+      }
 
-        if (response.ok) {
-          alert('Diagrama a fost salvată cu succes!');
-        } else {
-          alert(`Eroare: ${result.error}`);
-        }
-      } catch (error) {
-        console.error('Error saving diagram:', error);
-        alert(`Eroare la salvare: ${error.message}`);
+      const result = await response.json();
+
+      if (!response.ok) {
+        return { ok: false, message: result.error || 'Eroare la salvare!' };
+      }
+
+      const persistedId = result.diagramId || diagramIdToUpdate;
+      if (persistedId) {
+        setCurrentDiagramId(persistedId);
+        sessionStorage.setItem('currentDiagramId', persistedId);
+      }
+
+      if (diagramTitle) {
+        setTitle(diagramTitle);
+      }
+
+      return { ok: true, diagramId: persistedId };
+    } catch (error) {
+      console.error('Error saving diagram:', error);
+      return { ok: false, message: `Eroare la salvare: ${error.message}` };
+    }
+  };
+
+  const handleSaveToDatabase = async () => {
+    if (currentDiagramId) {
+      const result = await saveDiagram({
+        diagramTitle: title,
+        diagramIdToUpdate: currentDiagramId
+      });
+
+      if (result.ok) {
+        alert('Diagrama a fost salvată cu succes!');
+      } else {
+        alert(result.message || 'Eroare la salvare!');
       }
       return;
     }
@@ -976,41 +1018,18 @@ function ObjectDiagramEditor() {
     const diagramTitle = prompt('Introdu numele diagramei:', title || 'UML Object Diagram');
     if (!diagramTitle) return;
 
-    try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
-        alert('Trebuie să fii logat pentru a salva diagrama!');
-        return;
-      }
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      alert('Trebuie să fii logat pentru a salva diagrama!');
+      return;
+    }
 
-      const diagramData = {
-        title: diagramTitle,
-        userId: parseInt(userId),
-        diagram: {
-          selectedType: 'OBJECT',
-          elements: elements,
-          connections: prepareDiagramForSave()
-        }
-      };
+    const result = await saveDiagram({ diagramTitle });
 
-      const response = await fetch('http://localhost:5000/api/object-diagrams', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(diagramData)
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes!`);
-        setTitle(diagramTitle);
-        sessionStorage.setItem('currentDiagramId', result.diagramId);
-      } else {
-        alert(`Eroare: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      alert(`Eroare la salvare: ${error.message}`);
+    if (result.ok) {
+      alert(`Diagrama "${diagramTitle}" a fost salvată cu succes!`);
+    } else {
+      alert(result.message || 'Eroare la salvare!');
     }
   };
 

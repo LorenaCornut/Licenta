@@ -369,6 +369,7 @@ function ClassDiagramEditor() {
   const [editMemberValue, setEditMemberValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [title, setTitle] = useState('Untitled Diagram');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [draggingElement, setDraggingElement] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [resizing, setResizing] = useState(null);
@@ -387,6 +388,14 @@ function ClassDiagramEditor() {
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
+    } else {
+      setCurrentDiagramId(null);
+      setTitle('Untitled Diagram');
+      setElements([]);
+      setConnections([]);
+      setSelectedElement(null);
+      setSelectedConnection(null);
+      sessionStorage.removeItem('currentDiagramId');
     }
   }, [diagramId]);
 
@@ -417,7 +426,8 @@ function ClassDiagramEditor() {
         setTitle(result.diagram.title || 'Untitled Diagram');
         setElements(result.diagram.data.elements || []);
         setConnections(result.diagram.data.connections || []);
-        sessionStorage.setItem('currentDiagramId', result.diagram.id);
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
       } else {
         console.error('Invalid response format:', result);
         alert('Eroare: Format de răspuns invalid din server');
@@ -858,9 +868,13 @@ function ClassDiagramEditor() {
     });
   };
 
-  // EXACTLY LIKE UMLEditor - Save to Database
+  // Save or Update Diagram - Auto-detects based on currentDiagramId
   const handleSaveToDatabase = async () => {
-    const diagramTitle = prompt('Introdu numele diagramei:', title || 'UML Class Diagram');
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId
+      ? title
+      : prompt('Introdu numele diagramei:', title || 'UML Class Diagram');
+
     if (!diagramTitle) return;
 
     try {
@@ -871,8 +885,6 @@ function ClassDiagramEditor() {
       }
 
       const diagramData = {
-        title: diagramTitle,
-        userId: parseInt(userId),
         diagram: {
           selectedType: 'CLASS',
           elements: elements,
@@ -880,19 +892,49 @@ function ClassDiagramEditor() {
         }
       };
 
-      const response = await fetch('http://localhost:5000/api/class-diagrams', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(diagramData)
-      });
+      let response, result, method, url;
 
-      const result = await response.json();
+      if (activeDiagramId) {
+        // UPDATE existing diagram
+        method = 'PUT';
+        url = `http://localhost:5000/api/class-diagrams/${activeDiagramId}`;
+        response = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(diagramData)
+        });
+        result = await response.json();
 
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-        setTitle(diagramTitle);
-        sessionStorage.setItem('currentDiagramId', result.diagramId);
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+          setTitle(diagramTitle);
+        }
       } else {
+        // CREATE new diagram
+        method = 'POST';
+        url = 'http://localhost:5000/api/class-diagrams';
+        const newDiagramData = {
+          title: diagramTitle,
+          userId: parseInt(userId),
+          ...diagramData
+        };
+
+        response = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newDiagramData)
+        });
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
+          sessionStorage.setItem('currentDiagramId', result.diagramId);
+          setTitle(diagramTitle);
+        }
+      }
+
+      if (!response.ok) {
         alert(`Eroare: ${result.error}`);
       }
     } catch (error) {
@@ -901,43 +943,7 @@ function ClassDiagramEditor() {
     }
   };
 
-  // Handler for updating diagram in database
-  const handleUpdateInDatabase = async () => {
-    try {
-      const diagramId = sessionStorage.getItem('currentDiagramId');
-      if (!diagramId) {
-        alert('Nu ai o diagramă deschisă pentru actualizare. Salvează mai întâi una nouă.');
-        return;
-      }
 
-      const diagramData = {
-        diagram: {
-          selectedType: 'CLASS',
-          elements: elements,
-          connections: prepareDiagramForSave()
-        }
-      };
-
-      const response = await fetch(`http://localhost:5000/api/class-diagrams/${diagramId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(diagramData)
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        alert('Diagrama a fost actualizată cu succes!');
-      } else {
-        alert(`Eroare: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Error updating diagram:', error);
-      alert(`Eroare la actualizare: ${error.message}`);
-    }
-  };
 
   // EXACTLY LIKE UMLEditor - Export SVG
   // Escape XML characters for SVG
@@ -1207,7 +1213,6 @@ function ClassDiagramEditor() {
           <h1>{title}</h1>
           <div className="header-actions">
             <button className="btn-primary" onClick={handleSaveToDatabase}>💾 Save to DB</button>
-            <button className="btn-secondary" onClick={handleUpdateInDatabase} title="Update current diagram in database">🔄 Update</button>
             <div className="dropdown-save">
               <button className="btn-secondary">Export ▼</button>
               <div className="dropdown-content">

@@ -336,7 +336,7 @@
 }
 
 .dashboard-main {
-  margin-left: 90px;
+  margin-left: 0;
 }
 .dashboard-logo-center {
   display: flex;
@@ -350,6 +350,14 @@
   background: linear-gradient(120deg, #faf7ff 0%, #f3e8ff 100%);
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.dashboard-profile-top-right {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 400;
 }
 
 .dashboard-header {

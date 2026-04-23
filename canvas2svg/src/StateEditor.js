@@ -172,7 +172,7 @@ const StateEditor = () => {
         body: JSON.stringify({
           userId: parseInt(userId),
           title: diagramTitle.trim(),
-          tipDiagrama: 'Automat - Diagrama Stări',
+          tipDiagrama: 'AUTOMAT',
           nodes: elements.map(el => ({
             id: el.id,
             label: el.name || '',

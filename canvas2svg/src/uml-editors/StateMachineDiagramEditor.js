@@ -36,6 +36,58 @@ function getConnectionPointForElement(element, connectionPoint) {
 }
 
 function getClosestPointOnContour(element, pointX, pointY) {
+  // Special handling for CHOICE_POINT - snap to the diamond vertices + edges
+  if (element.type === 'CHOICE_POINT') {
+    const centerX = element.x + element.width / 2;
+    const centerY = element.y + element.height / 2;
+    
+    // Diamond vertices (exact corners on the edges of the bounding box)
+    const topVtx = { x: centerX, y: element.y };
+    const rightVtx = { x: element.x + element.width, y: centerY };
+    const bottomVtx = { x: centerX, y: element.y + element.height };
+    const leftVtx = { x: element.x, y: centerY };
+    
+    // Helper: closest point on line segment
+    const closestOnSegment = (p1, p2) => {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return { x: p1.x, y: p1.y, t: 0 };
+      
+      let t = ((pointX - p1.x) * dx + (pointY - p1.y) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      
+      return {
+        x: p1.x + t * dx,
+        y: p1.y + t * dy,
+        t: t
+      };
+    };
+    
+    // Find closest point on diamond perimeter
+    const edges = [
+      { p1: topVtx, p2: rightVtx, edge: 'top' },
+      { p1: rightVtx, p2: bottomVtx, edge: 'right' },
+      { p1: bottomVtx, p2: leftVtx, edge: 'bottom' },
+      { p1: leftVtx, p2: topVtx, edge: 'left' }
+    ];
+    
+    let closest = null;
+    let minDist = Infinity;
+    
+    for (const seg of edges) {
+      const proj = closestOnSegment(seg.p1, seg.p2);
+      const dist = Math.hypot(proj.x - pointX, proj.y - pointY);
+      
+      if (dist < minDist) {
+        minDist = dist;
+        closest = { edge: seg.edge, offset: proj.t };
+      }
+    }
+    
+    return closest || { edge: 'top', offset: 0.5 };
+  }
+  
   const candidates = [
     { edge: 'top', x: Math.max(element.x, Math.min(pointX, element.x + element.width)), y: element.y },
     { edge: 'bottom', x: Math.max(element.x, Math.min(pointX, element.x + element.width)), y: element.y + element.height },
@@ -324,6 +376,41 @@ function getContourIntersection(x1, y1, x2, y2, element) {
  */
 function getPointAtOffsetOnEdge(element, edgeType, offset) {
   offset = Math.max(0, Math.min(1, offset || 0.5));
+  
+  // Special handling for CHOICE_POINT - diamond shape
+  if (element.type === 'CHOICE_POINT') {
+    const centerX = element.x + element.width / 2;
+    const centerY = element.y + element.height / 2;
+    
+    // Diamond vertices (exact coordinates on the edges of the bounding box)
+    const topVtx = { x: centerX, y: element.y };
+    const rightVtx = { x: element.x + element.width, y: centerY };
+    const bottomVtx = { x: centerX, y: element.y + element.height };
+    const leftVtx = { x: element.x, y: centerY };
+    
+    let p1, p2;
+    if (edgeType === 'top') {
+      p1 = topVtx;
+      p2 = rightVtx;
+    } else if (edgeType === 'right') {
+      p1 = rightVtx;
+      p2 = bottomVtx;
+    } else if (edgeType === 'bottom') {
+      p1 = bottomVtx;
+      p2 = leftVtx;
+    } else if (edgeType === 'left') {
+      p1 = leftVtx;
+      p2 = topVtx;
+    } else {
+      return { x: centerX, y: centerY };
+    }
+    
+    // Exact linear interpolation along the edge
+    const x = p1.x + (p2.x - p1.x) * offset;
+    const y = p1.y + (p2.y - p1.y) * offset;
+    return { x, y };
+  }
+  
   let x, y;
   
   if (edgeType === 'top') {
@@ -568,14 +655,18 @@ function StateMachineDiagramEditor() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveDialogTitle, setSaveDialogTitle] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [editingActions, setEditingActions] = useState(null);
   const [editingEntryAction, setEditingEntryAction] = useState('');
   const [editingExitAction, setEditingExitAction] = useState('');
+  const [draggingInCanvas, setDraggingInCanvas] = useState(false);
 
   // Load diagram if editing
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
+    } else {
+      setCurrentDiagramId(null);
     }
   }, [diagramId]);
 
@@ -587,13 +678,15 @@ function StateMachineDiagramEditor() {
 
       // Backend returns: { diagram: {...}, elements: [...], connections: [...] }
       const diagram = data.diagram;
-      const diagramType = diagram?.type || data.tipDiagrama;
+      const diagramType = (diagram?.type || data.tipDiagrama || '').toString();
+      const diagramTypeLower = diagramType.toLowerCase();
       
       // Check for state machine diagram type
-      const isStateMachine = diagramType === 'STATE_MACHINE_DIAGRAM' || 
-                            diagramType === 'Automat - Diagrama Stări' || 
-                            diagramType?.includes('Automat') || 
-                            diagramType?.includes('Stări');
+      const isStateMachine = diagramType === 'STATE_MACHINE_DIAGRAM' ||
+                            diagramType === 'AUTOMAT' ||
+                            diagramTypeLower.includes('automat') ||
+                            diagramTypeLower.includes('stări') ||
+                            diagramTypeLower.includes('stari');
       
       if (isStateMachine) {
         // Normalize elements: backend uses 'name' but frontend expects 'label'
@@ -612,6 +705,7 @@ function StateMachineDiagramEditor() {
         setTitle(diagram?.title || data.title || 'State Machine Diagram');
         setElements(normalizedElements);
         setConnections(ensureConnectionOffsets(data.connections || []));
+        setCurrentDiagramId(id);
         sessionStorage.setItem('currentDiagramId', id);
       }
     } catch (error) {
@@ -627,28 +721,37 @@ function StateMachineDiagramEditor() {
       return;
     }
 
+    if (currentDiagramId) {
+      const effectiveTitle = (title || 'State Machine Diagram').trim();
+      const result = await saveDiagram({
+        diagramTitle: effectiveTitle,
+        diagramIdToUpdate: currentDiagramId
+      });
+
+      if (result.ok) {
+        alert('✅ Diagrama a fost actualizată cu succes!');
+      } else {
+        alert(result.message || 'Eroare la actualizare!');
+      }
+      return;
+    }
+
     setSaveDialogTitle(title || 'State Machine Diagram');
     setShowSaveModal(true);
     setSaveError('');
   };
 
-  const confirmSave = async () => {
-    if (!saveDialogTitle.trim()) {
-      setSaveError('Te rog introdu un nume pentru diagramă!');
-      return;
-    }
-
+  const saveDiagram = async ({ diagramTitle, diagramIdToUpdate = null }) => {
     const userId = localStorage.getItem('userId');
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
 
     try {
       const diagramData = {
         userId: parseInt(userId),
-        title: saveDialogTitle.trim(),
-        tipDiagrama: 'Automat - Diagrama Stări',
+        title: diagramTitle,
+        tipDiagrama: 'STATE_MACHINE_DIAGRAM',
         elements: elements,
         connections: ensureConnectionOffsets(connections),
-        ...(currentDiagramId && { diagramId: currentDiagramId })
+        ...(diagramIdToUpdate && { diagramId: diagramIdToUpdate })
       };
 
       const response = await fetch('http://localhost:5000/api/diagrams/save', {
@@ -659,21 +762,39 @@ function StateMachineDiagramEditor() {
 
       const result = await response.json();
 
-      if (response.ok) {
-        setTitle(saveDialogTitle.trim());
-        if (result.diagramId) {
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-        }
-        setShowSaveModal(false);
-        setSaveDialogTitle('');
-        setSaveError('');
-        alert('✅ Diagrama salvată cu succes!');
-      } else {
-        setSaveError(result.message || 'Eroare la salvare!');
+      if (!response.ok) {
+        return { ok: false, message: result.message || 'Eroare la salvare!' };
       }
+
+      const persistedId = result.diagramId || diagramIdToUpdate;
+      if (persistedId) {
+        setCurrentDiagramId(persistedId);
+        sessionStorage.setItem('currentDiagramId', persistedId);
+      }
+
+      setTitle(diagramTitle);
+      return { ok: true };
     } catch (error) {
       console.error('Error saving diagram:', error);
-      setSaveError(`Eroare: ${error.message}`);
+      return { ok: false, message: `Eroare: ${error.message}` };
+    }
+  };
+
+  const confirmSave = async () => {
+    if (!saveDialogTitle.trim()) {
+      setSaveError('Te rog introdu un nume pentru diagramă!');
+      return;
+    }
+
+    const result = await saveDiagram({ diagramTitle: saveDialogTitle.trim() });
+
+    if (result.ok) {
+      setShowSaveModal(false);
+      setSaveDialogTitle('');
+      setSaveError('');
+      alert('✅ Diagrama salvată cu succes!');
+    } else {
+      setSaveError(result.message || 'Eroare la salvare!');
     }
   };
 
@@ -693,11 +814,73 @@ function StateMachineDiagramEditor() {
     setElements([...elements, newElement]);
   };
 
+  // Drag and drop handlers
+  const handleDragStart = (e, elementType) => {
+    setDraggedType(elementType);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleCanvasDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDraggingInCanvas(true);
+  };
+
+  const handleCanvasDragLeave = () => {
+    setDraggingInCanvas(false);
+  };
+
+  const handleCanvasDrop = (e) => {
+    e.preventDefault();
+    setDraggingInCanvas(false);
+
+    if (!draggedType || !canvasRef.current) return;
+
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    const width = draggedType === 'INITIAL_STATE' || draggedType === 'FINAL_STATE' ? 40 : 140;
+    const height = draggedType === 'INITIAL_STATE' || draggedType === 'FINAL_STATE' ? 40 : 80;
+    const x = Math.max(0, e.clientX - canvasRect.left - width / 2);
+    const y = Math.max(0, e.clientY - canvasRect.top - height / 2);
+
+    const newElement = {
+      id: `state-${Date.now()}`,
+      type: draggedType,
+      x,
+      y,
+      width,
+      height,
+      label: draggedType === 'STATE' ? 'New State' : '',
+      entryAction: draggedType === 'STATE' ? '' : undefined,
+      exitAction: draggedType === 'STATE' ? '' : undefined
+    };
+
+    setElements([...elements, newElement]);
+    setDraggedType(null);
+  };
+
   // Delete element
   const handleDeleteElement = (id) => {
     setElements(elements.filter(el => el.id !== id));
     setConnections(connections.filter(conn => conn.from !== id && conn.to !== id));
     setSelectedElement(null);
+  };
+
+  // Handle resize start
+  const handleResizeMouseDown = (e, el, handle) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    
+    setResizing({
+      elementId: el.id,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: el.width,
+      startHeight: el.height,
+      startElX: el.x,
+      startElY: el.y
+    });
   };
 
   // Drag element
@@ -741,6 +924,79 @@ function StateMachineDiagramEditor() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [draggingElement, dragOffset, elements]);
+
+  // Canvas mouse move for resizing
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!resizing) return;
+      
+      const { elementId, handle, startX, startY, startWidth, startHeight, startElX, startElY } = resizing;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+      let newX = startElX;
+      let newY = startElY;
+
+      const minWidth = 60;
+      const minHeight = 40;
+
+      // Handle different resize handles
+      if (handle.includes('right') || handle === 'right') {
+        newWidth = Math.max(minWidth, startWidth + deltaX);
+      }
+      if (handle.includes('bottom') || handle === 'bottom') {
+        newHeight = Math.max(minHeight, startHeight + deltaY);
+      }
+      if (handle.includes('left') || handle === 'left') {
+        const potentialWidth = startWidth - deltaX;
+        if (potentialWidth >= minWidth) {
+          newWidth = potentialWidth;
+          newX = startElX + deltaX;
+        }
+      }
+      if (handle.includes('top') || handle === 'top') {
+        const potentialHeight = startHeight - deltaY;
+        if (potentialHeight >= minHeight) {
+          newHeight = potentialHeight;
+          newY = startElY + deltaY;
+        }
+      }
+
+      setElements(elements.map(el => {
+        if (el.id !== elementId) return el;
+        
+        let finalWidth = newWidth;
+        let finalHeight = newHeight;
+        let finalX = newX;
+        let finalY = newY;
+
+        // For circles (INITIAL_STATE, FINAL_STATE), keep width = height
+        if (el.type === 'INITIAL_STATE' || el.type === 'FINAL_STATE') {
+          const size = Math.max(30, Math.min(finalWidth, finalHeight));
+          finalWidth = size;
+          finalHeight = size;
+        }
+
+        return { ...el, x: Math.max(0, finalX), y: Math.max(0, finalY), width: finalWidth, height: finalHeight };
+      }));
+    };
+
+    const handleMouseUp = () => {
+      setResizing(null);
+    };
+
+    if (resizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizing, elements]);
 
   // Connection mode
   const handleStartConnection = (e, fromElement) => {
@@ -1127,7 +1383,9 @@ function StateMachineDiagramEditor() {
                 <div
                   key={key}
                   className="element-item"
+                  draggable
                   onClick={() => handleAddElement(key)}
+                  onDragStart={(e) => handleDragStart(e, key)}
                   title={data.label}
                 >
                   <span className="element-icon">{data.icon}</span>
@@ -1153,12 +1411,15 @@ function StateMachineDiagramEditor() {
 
           <svg
             ref={canvasRef}
-            className="uml-canvas"
+            className={`uml-canvas ${draggingInCanvas ? 'drag-over' : ''}`}
             onClick={() => {
               setSelectedElement(null);
               setConnectionMode(null);
               setConnectionStart(null);
             }}
+            onDragOver={handleCanvasDragOver}
+            onDrop={handleCanvasDrop}
+            onDragLeave={handleCanvasDragLeave}
           >
             {/* Marker definitions */}
             <defs>
@@ -1364,17 +1625,29 @@ function StateMachineDiagramEditor() {
                         [click to add actions]
                       </text>
                     )}
-                    {/* Connection point */}
-                    <circle
-                      cx={el.x + el.width}
-                      cy={el.y + el.height / 2}
-                      r="6"
-                      fill="#667eea"
-                      stroke="white"
-                      strokeWidth="2"
-                      onMouseDown={(e) => handleStartConnection(e, el)}
-                      style={{ cursor: 'pointer' }}
-                    />
+
+                    {/* Resize handles - only when selected */}
+                    {isSelected && (
+                      <>
+                        {/* Top-left */}
+                        <circle cx={el.x} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top-left'); }} style={{ cursor: 'nwse-resize', pointerEvents: 'auto' }} />
+                        {/* Top */}
+                        <circle cx={el.x + el.width / 2} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Top-right */}
+                        <circle cx={el.x + el.width} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top-right'); }} style={{ cursor: 'nesw-resize', pointerEvents: 'auto' }} />
+                        {/* Right */}
+                        <circle cx={el.x + el.width} cy={el.y + el.height / 2} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'right'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom-right */}
+                        <circle cx={el.x + el.width} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom-right'); }} style={{ cursor: 'se-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom */}
+                        <circle cx={el.x + el.width / 2} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom-left */}
+                        <circle cx={el.x} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom-left'); }} style={{ cursor: 'sw-resize', pointerEvents: 'auto' }} />
+                        {/* Left */}
+                        <circle cx={el.x} cy={el.y + el.height / 2} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'left'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                      </>
+                    )}
+
                   </g>
                 );
               }
@@ -1406,18 +1679,32 @@ function StateMachineDiagramEditor() {
                       stroke={isSelected ? '#dc2626' : '#333'}
                       strokeWidth={isSelected ? 3 : 2}
                     />
+
+                    {/* Resize handles for circle - only when selected */}
                     {isSelected && (
-                      <circle
-                        cx={el.x + el.width / 2}
-                        cy={el.y + el.height}
-                        r="6"
-                        fill="#667eea"
-                        stroke="white"
-                        strokeWidth="2"
-                        onMouseDown={(e) => handleStartConnection(e, el)}
-                        style={{ cursor: 'pointer' }}
-                      />
+                      <>
+                        {/* Top-left */}
+                        <circle cx={el.x} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top-left'); }} style={{ cursor: 'nwse-resize', pointerEvents: 'auto' }} />
+                        {/* Top */}
+                        <circle cx={el.x + el.width / 2} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Top-right */}
+                        <circle cx={el.x + el.width} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top-right'); }} style={{ cursor: 'nesw-resize', pointerEvents: 'auto' }} />
+                        {/* Right */}
+                        <circle cx={el.x + el.width} cy={el.y + el.height / 2} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'right'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom-right */}
+                        <circle cx={el.x + el.width} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom-right'); }} style={{ cursor: 'se-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom */}
+                        <circle cx={el.x + el.width / 2} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom-left */}
+                        <circle cx={el.x} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom-left'); }} style={{ cursor: 'sw-resize', pointerEvents: 'auto' }} />
+                        {/* Left */}
+                        <circle cx={el.x} cy={el.y + el.height / 2} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'left'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        
+                        {/* Bounding box rectangle */}
+                        <rect x={el.x} y={el.y} width={el.width} height={el.height} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="4" pointerEvents="none" />
+                      </>
                     )}
+
                   </g>
                 );
               }
@@ -1455,6 +1742,32 @@ function StateMachineDiagramEditor() {
                       r={el.width / 4}
                       fill="#333"
                     />
+
+                    {/* Resize handles for circle - only when selected */}
+                    {isSelected && (
+                      <>
+                        {/* Top-left */}
+                        <circle cx={el.x} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top-left'); }} style={{ cursor: 'nwse-resize', pointerEvents: 'auto' }} />
+                        {/* Top */}
+                        <circle cx={el.x + el.width / 2} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Top-right */}
+                        <circle cx={el.x + el.width} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top-right'); }} style={{ cursor: 'nesw-resize', pointerEvents: 'auto' }} />
+                        {/* Right */}
+                        <circle cx={el.x + el.width} cy={el.y + el.height / 2} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'right'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom-right */}
+                        <circle cx={el.x + el.width} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom-right'); }} style={{ cursor: 'se-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom */}
+                        <circle cx={el.x + el.width / 2} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom-left */}
+                        <circle cx={el.x} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom-left'); }} style={{ cursor: 'sw-resize', pointerEvents: 'auto' }} />
+                        {/* Left */}
+                        <circle cx={el.x} cy={el.y + el.height / 2} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'left'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        
+                        {/* Bounding box rectangle */}
+                        <rect x={el.x} y={el.y} width={el.width} height={el.height} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="4" pointerEvents="none" />
+                      </>
+                    )}
+
                   </g>
                 );
               }
@@ -1486,18 +1799,24 @@ function StateMachineDiagramEditor() {
                       stroke={isSelected ? '#dc2626' : '#333'}
                       strokeWidth={isSelected ? 3 : 2}
                     />
+
+                    {/* Resize handles - only when selected */}
                     {isSelected && (
-                      <circle
-                        cx={el.x + el.width}
-                        cy={el.y + el.height / 2}
-                        r="6"
-                        fill="#667eea"
-                        stroke="white"
-                        strokeWidth="2"
-                        onMouseDown={(e) => handleStartConnection(e, el)}
-                        style={{ cursor: 'pointer' }}
-                      />
+                      <>
+                        {/* Top */}
+                        <circle cx={cx} cy={el.y} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'top'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Right */}
+                        <circle cx={el.x + el.width} cy={cy} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'right'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        {/* Bottom */}
+                        <circle cx={cx} cy={el.y + el.height} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'bottom'); }} style={{ cursor: 'ns-resize', pointerEvents: 'auto' }} />
+                        {/* Left */}
+                        <circle cx={el.x} cy={cy} r="5" fill="#a78bfa" stroke="white" strokeWidth="1" onMouseDown={(e) => { e.stopPropagation(); handleResizeMouseDown(e, el, 'left'); }} style={{ cursor: 'ew-resize', pointerEvents: 'auto' }} />
+                        
+                        {/* Bounding box rectangle */}
+                        <rect x={el.x} y={el.y} width={el.width} height={el.height} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="4" pointerEvents="none" />
+                      </>
                     )}
+
                   </g>
                 );
               }

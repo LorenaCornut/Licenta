@@ -475,10 +475,12 @@ function ActivityDiagramEditor() {
   const [draggingEndpoint, setDraggingEndpoint] = useState(null);
   const [resizing, setResizing] = useState(null);
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const endpointDragRef = useRef(null);
 
   useEffect(() => {
     if (diagramId && diagramId !== 'new') loadDiagram(diagramId);
+    else setCurrentDiagramId(null);
   }, [diagramId]);
 
   useEffect(() => {
@@ -632,6 +634,8 @@ function ActivityDiagramEditor() {
         setElements(result.diagram.data.elements || []);
         const loadedConnections = result.diagram.data.connections || [];
         setConnections(ensureConnectionOffsets(loadedConnections));
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
       }
     } catch (error) {
       console.error('Error loading:', error);
@@ -891,9 +895,8 @@ function ActivityDiagramEditor() {
   };
 
   const handleSaveToDatabase = async () => {
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = currentDiagramId 
-      ? title 
+    const diagramTitle = currentDiagramId
+      ? title
       : prompt('Introdu numele diagramei:', title || 'Activity Diagram');
     
     if (!diagramTitle) return;
@@ -917,41 +920,43 @@ function ActivityDiagramEditor() {
 
       console.log('Saving diagram data:', diagramData);
 
-      let response, result, method, url;
-      
+      let response;
+      let result;
+
       if (currentDiagramId) {
-        method = 'PUT';
-        url = `http://localhost:5000/api/class-diagrams/${currentDiagramId}`;
-        response = await fetch(url, {
-          method: method,
+        response = await fetch(`http://localhost:5000/api/class-diagrams/${currentDiagramId}`, {
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(diagramData)
         });
         result = await response.json();
-        
+
         if (response.ok) {
+          setTitle(diagramTitle);
           alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
         }
       } else {
-        method = 'POST';
-        url = 'http://localhost:5000/api/class-diagrams';
         const newDiagramData = {
           title: diagramTitle,
           userId: parseInt(userId),
           ...diagramData
         };
-        
-        response = await fetch(url, {
-          method: method,
+
+        response = await fetch('http://localhost:5000/api/class-diagrams', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newDiagramData)
         });
         result = await response.json();
-        
+
         if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
+          const newDiagramId = result.diagramId;
+          if (newDiagramId) {
+            setCurrentDiagramId(newDiagramId);
+            sessionStorage.setItem('currentDiagramId', newDiagramId);
+          }
           setTitle(diagramTitle);
+          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${newDiagramId}`);
         }
       }
 

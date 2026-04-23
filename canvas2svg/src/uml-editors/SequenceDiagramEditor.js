@@ -110,6 +110,7 @@ function SequenceDiagramEditor() {
   const canvasRef = useRef(null);
   
   const [title, setTitle] = useState('Sequence Diagram');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
   const [selectedElement, setSelectedElement] = useState(null);
@@ -130,7 +131,17 @@ function SequenceDiagramEditor() {
   const endpointDragRef = useRef(null);
 
   useEffect(() => {
-    if (diagramId && diagramId !== 'new') loadDiagram(diagramId);
+    if (diagramId && diagramId !== 'new') {
+      loadDiagram(diagramId);
+    } else {
+      setCurrentDiagramId(null);
+      setTitle('Sequence Diagram');
+      setElements([]);
+      setConnections([]);
+      setSelectedElement(null);
+      setSelectedConnection(null);
+      sessionStorage.removeItem('currentDiagramId');
+    }
   }, [diagramId]);
 
   useEffect(() => {
@@ -283,6 +294,8 @@ function SequenceDiagramEditor() {
         setTitle(result.diagram.title || 'Sequence Diagram');
         setElements(result.diagram.data.elements || []);
         setConnections(result.diagram.data.connections || []);
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
       }
     } catch (error) {
       console.error('Error loading:', error);
@@ -426,7 +439,11 @@ function SequenceDiagramEditor() {
   };
 
   const handleSaveToDatabase = async () => {
-    const diagramTitle = prompt('Introdu numele diagramei:', title || 'Sequence Diagram');
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId
+      ? title
+      : prompt('Introdu numele diagramei:', title || 'Sequence Diagram');
+
     if (!diagramTitle) return;
 
     try {
@@ -437,8 +454,6 @@ function SequenceDiagramEditor() {
       }
 
       const diagramData = {
-        title: diagramTitle,
-        userId: parseInt(userId),
         diagram: {
           selectedType: 'SEQUENCE',
           elements: elements,
@@ -446,18 +461,49 @@ function SequenceDiagramEditor() {
         }
       };
 
-      const response = await fetch('http://localhost:5000/api/class-diagrams', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(diagramData)
-      });
+      let response, result, method, url;
 
-      const result = await response.json();
+      if (activeDiagramId) {
+        // UPDATE existing diagram
+        method = 'PUT';
+        url = `http://localhost:5000/api/class-diagrams/${activeDiagramId}`;
+        response = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(diagramData)
+        });
+        result = await response.json();
 
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-        sessionStorage.setItem('currentDiagramId', result.diagramId);
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+          setTitle(diagramTitle);
+        }
       } else {
+        // CREATE new diagram
+        method = 'POST';
+        url = 'http://localhost:5000/api/class-diagrams';
+        const newDiagramData = {
+          title: diagramTitle,
+          userId: parseInt(userId),
+          ...diagramData
+        };
+
+        response = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newDiagramData)
+        });
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
+          sessionStorage.setItem('currentDiagramId', result.diagramId);
+          setTitle(diagramTitle);
+        }
+      }
+
+      if (!response.ok) {
         alert(`Eroare: ${result.error}`);
       }
     } catch (error) {
@@ -484,6 +530,8 @@ function SequenceDiagramEditor() {
             setElements(data.elements);
             setConnections(data.connections);
             setTitle(data.title || 'Imported Diagram');
+            setCurrentDiagramId(null);
+            sessionStorage.removeItem('currentDiagramId');
             setSelectedElement(null);
             setSelectedConnection(null);
             alert('✅ Diagram imported successfully!');

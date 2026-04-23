@@ -203,6 +203,7 @@ function UseCaseDiagramEditor() {
   const canvasRef = useRef(null);
   
   const [title, setTitle] = useState('Use Case Diagram');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
   const [selectedElement, setSelectedElement] = useState(null);
@@ -223,7 +224,17 @@ function UseCaseDiagramEditor() {
   const endpointDragRef = useRef(null);
 
   useEffect(() => {
-    if (diagramId && diagramId !== 'new') loadDiagram(diagramId);
+    if (diagramId && diagramId !== 'new') {
+      loadDiagram(diagramId);
+    } else {
+      setCurrentDiagramId(null);
+      sessionStorage.removeItem('currentDiagramId');
+      setTitle('Use Case Diagram');
+      setElements([]);
+      setConnections([]);
+      setSelectedElement(null);
+      setSelectedConnection(null);
+    }
   }, [diagramId]);
 
   useEffect(() => {
@@ -387,6 +398,8 @@ function UseCaseDiagramEditor() {
         setElements(result.diagram.data.elements || []);
         const loadedConnections = result.diagram.data.connections || [];
         setConnections(ensureConnectionOffsets(loadedConnections));
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
       }
     } catch (error) {
       console.error('Error loading:', error);
@@ -588,8 +601,8 @@ function UseCaseDiagramEditor() {
   };
 
   const handleSaveToDatabase = async () => {
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = currentDiagramId 
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId 
       ? title 
       : prompt('Introdu numele diagramei:', title || 'Use Case Diagram');
     
@@ -617,10 +630,10 @@ function UseCaseDiagramEditor() {
 
       let response, result, method, url;
       
-      if (currentDiagramId) {
+      if (activeDiagramId) {
         // UPDATE existing diagram
         method = 'PUT';
-        url = `http://localhost:5000/api/class-diagrams/${currentDiagramId}`;
+        url = `http://localhost:5000/api/class-diagrams/${activeDiagramId}`;
         response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
@@ -630,6 +643,7 @@ function UseCaseDiagramEditor() {
         
         if (response.ok) {
           alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+          setTitle(diagramTitle);
         }
       } else {
         // CREATE new diagram
@@ -650,6 +664,7 @@ function UseCaseDiagramEditor() {
         
         if (response.ok) {
           alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
           sessionStorage.setItem('currentDiagramId', result.diagramId);
           setTitle(diagramTitle);
         }
@@ -681,6 +696,8 @@ function UseCaseDiagramEditor() {
             setElements(data.elements);
             setConnections(ensureConnectionOffsets(data.connections));
             setTitle(data.title || 'Imported Diagram');
+            setCurrentDiagramId(null);
+            sessionStorage.removeItem('currentDiagramId');
             setSelectedElement(null);
             setSelectedConnection(null);
             alert('✅ Diagram imported successfully!');

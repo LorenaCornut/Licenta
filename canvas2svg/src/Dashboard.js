@@ -13,6 +13,9 @@ function Dashboard() {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   const createBtnRef = useRef(null);
+  const [showTopCreateMenu, setShowTopCreateMenu] = useState(false);
+  const topCreateMenuRef = useRef(null);
+  const topCreateBtnRef = useRef(null);
   const profileBtnRef = useRef(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   
@@ -58,21 +61,29 @@ function Dashboard() {
       if (
         menuRef.current &&
         !menuRef.current.contains(event.target) &&
-        !createBtnRef.current.contains(event.target)
+        (!createBtnRef.current || !createBtnRef.current.contains(event.target))
       ) {
         setShowMenu(false);
       }
       if (
+        showTopCreateMenu &&
+        topCreateMenuRef.current &&
+        !topCreateMenuRef.current.contains(event.target) &&
+        (!topCreateBtnRef.current || !topCreateBtnRef.current.contains(event.target))
+      ) {
+        setShowTopCreateMenu(false);
+      }
+      if (
         profileMenuRef.current &&
         !profileMenuRef.current.contains(event.target) &&
-        !profileBtnRef.current.contains(event.target)
+        (!profileBtnRef.current || !profileBtnRef.current.contains(event.target))
       ) {
         setShowProfileMenu(false);
       }
       if (
         startMenuRef.current &&
         !startMenuRef.current.contains(event.target) &&
-        !startBtnRef.current.contains(event.target)
+        (!startBtnRef.current || !startBtnRef.current.contains(event.target))
       ) {
         setShowStartMenu(false);
       }
@@ -83,7 +94,7 @@ function Dashboard() {
         setShowSearchSuggestions(false);
       }
     }
-    if (showMenu || showProfileMenu || showStartMenu || showSearchSuggestions) {
+    if (showMenu || showTopCreateMenu || showProfileMenu || showStartMenu || showSearchSuggestions) {
       document.addEventListener('mousedown', handleClickOutside);
     } else {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -91,7 +102,7 @@ function Dashboard() {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showMenu, showProfileMenu, showStartMenu, showSearchSuggestions]);
+  }, [showMenu, showTopCreateMenu, showProfileMenu, showStartMenu, showSearchSuggestions]);
 
   const profileMenuRef = useRef(null);
 
@@ -147,9 +158,13 @@ function Dashboard() {
       navigate(`/uml-editor/activity/${diagram.id_diagrama}`);
     } else if (type.includes('object')) {
       navigate(`/uml-editor/object/${diagram.id_diagrama}`);
+    } else if (type.includes('composite')) {
+      navigate(`/uml-editor/composite/${diagram.id_diagrama}`);
+    } else if (type.includes('automat')) {
+      navigate(`/state/${diagram.id_diagrama}`);
     } else if (type.includes('state machine') || type.includes('state_machine')) {
       navigate(`/uml-editor/state-machine/${diagram.id_diagrama}`);
-    } else if (type.includes('state') || type.includes('automat')) {
+    } else if (type.includes('state')) {
       navigate(`/uml-editor/state-machine/${diagram.id_diagrama}`);
     } else if (type.includes('neorientat')) {
       navigate(`/graph/${diagram.id_diagrama}`);
@@ -370,6 +385,7 @@ function Dashboard() {
   function handleUMLTypeSelect(type) {
     setShowUMLTypeModal(false);
     setShowMenu(false);
+    setShowTopCreateMenu(false);
     switch(type) {
       case 'CLASS':
         navigate('/uml-editor/class/new');
@@ -408,7 +424,57 @@ function Dashboard() {
 
   return (
     <div className="dashboard-root">
-      <aside className="dashboard-sidebar">
+      <div className="dashboard-profile-top-right">
+        <button
+          className="sidebar-profile-btn"
+          aria-label="Profil utilizator"
+          ref={profileBtnRef}
+          onClick={() => setShowProfileMenu((v) => !v)}
+        >
+          {profilePicture ? (
+            <img src={profilePicture} alt="Profil" className="sidebar-profile-img" />
+          ) : (
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="18" cy="18" r="16" stroke="#8b5cf6" strokeWidth="2" fill="#ede9fe"/>
+              <circle cx="18" cy="15" r="5" stroke="#8b5cf6" strokeWidth="2" fill="#fff"/>
+              <path d="M10 28c0-4 8-4 8-4s8 0 8 4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
+            </svg>
+          )}
+        </button>
+        {showProfileMenu && (
+          <div
+            className="profile-menu-dropdown"
+            ref={profileMenuRef}
+            style={{
+              position: 'absolute',
+              top: '100%',
+              right: 0,
+              left: 'auto',
+              bottom: 'auto',
+              marginTop: '8px'
+            }}
+          >
+            <div className="profile-menu-header">
+              {profilePicture ? (
+                <img src={profilePicture} alt="Profil" className="profile-menu-img" />
+              ) : (
+                <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="18" cy="18" r="16" stroke="#8b5cf6" strokeWidth="2" fill="#ede9fe"/>
+                  <circle cx="18" cy="15" r="5" stroke="#8b5cf6" strokeWidth="2" fill="#fff"/>
+                  <path d="M10 28c0-4 8-4 8-4s8 0 8 4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
+                </svg>
+              )}
+              <span className="profile-menu-username">{userName}</span>
+            </div>
+            <button className="profile-menu-btn" onClick={() => navigate('/settings')}>Setări</button>
+            <button className="profile-menu-btn" onClick={handleHelp}>Help</button>
+            <button className="profile-menu-btn" onClick={handleInfo}>Info</button>
+            <button className="profile-menu-btn" onClick={handleLogout}>Deconectare</button>
+          </div>
+        )}
+      </div>
+
+      {false && (<aside className="dashboard-sidebar">
         <button className="sidebar-btn sidebar-hamburger" aria-label="Deschide meniu">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect y="7" width="32" height="3.5" rx="1.5" fill="#5b21b6"/>
@@ -559,7 +625,7 @@ function Dashboard() {
             </div>
           )}
         </div>
-      </aside>
+      </aside>)}
       <main className="dashboard-main">
         <h1 className="dashboard-title dashboard-title-gradient">Ce design vei crea astăzi?</h1>
         <div className="dashboard-top-buttons">
@@ -570,20 +636,37 @@ function Dashboard() {
             </svg>
             <span>Designurile tale</span>
           </button>
-          <button className="dashboard-top-btn">
-            <svg width="32" height="32" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="4" y="4" width="14" height="14" rx="4" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
-              <line x1="4" y1="11" x2="18" y2="11" stroke="#8b5cf6" strokeWidth="2"/>
-            </svg>
-            <span>Șabloane</span>
-          </button>
-          <button className="dashboard-top-btn">
-            <svg width="32" height="32" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="11" cy="11" r="9" stroke="#8b5cf6" strokeWidth="2" fill="none"/>
-              <text x="7" y="16" fontSize="8" fill="#8b5cf6">AI</text>
-            </svg>
-            <span>AI Assistant</span>
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button
+              className="dashboard-top-btn"
+              ref={topCreateBtnRef}
+              onClick={() => setShowTopCreateMenu((v) => !v)}
+              aria-label="Crează"
+            >
+              <svg width="32" height="32" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="13" y="6" width="2" height="16" rx="1" fill="#8b5cf6"/>
+                <rect x="6" y="13" width="16" height="2" rx="1" fill="#8b5cf6"/>
+              </svg>
+              <span>Crează</span>
+            </button>
+            {showTopCreateMenu && (
+              <div
+                className="create-menu-dropdown"
+                ref={topCreateMenuRef}
+                style={{
+                  top: 'calc(100% + 8px)',
+                  left: '50%',
+                  transform: 'translateX(-50%)'
+                }}
+              >
+                <button className="create-menu-btn" onClick={() => { setShowTopCreateMenu(false); navigate('/orientedgraph'); }}>Graf orientat</button>
+                <button className="create-menu-btn" onClick={() => { setShowTopCreateMenu(false); navigate('/graph'); }}>Graf neorientat</button>
+                <button className="create-menu-btn" onClick={() => { setShowTopCreateMenu(false); setShowUMLTypeModal(true); }}>UML</button>
+                <button className="create-menu-btn" onClick={() => { setShowTopCreateMenu(false); navigate('/petrinet'); }}>Rețea Petri</button>
+                <button className="create-menu-btn" onClick={() => { setShowTopCreateMenu(false); navigate('/state'); }}>Automat</button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="dashboard-search-box" ref={searchBoxRef}>
           <input 

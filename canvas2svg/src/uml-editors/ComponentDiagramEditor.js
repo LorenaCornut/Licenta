@@ -416,6 +416,7 @@ export default function ComponentDiagramEditor() {
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
   const [title, setTitle] = useState('Component Diagram');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [selectedElement, setSelectedElement] = useState(null);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [connectionMode, setConnectionMode] = useState(null);
@@ -443,6 +444,7 @@ export default function ComponentDiagramEditor() {
         setElements(result.diagram.data.elements || []);
         const loadedConnections = result.diagram.data.connections || [];
         setConnections(ensureConnectionOffsets(loadedConnections));
+        setCurrentDiagramId(id);
         sessionStorage.setItem('currentDiagramId', id);
       }
     } catch (error) {
@@ -456,10 +458,13 @@ export default function ComponentDiagramEditor() {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
     } else if (diagramId === 'new') {
+      setCurrentDiagramId(null);
       sessionStorage.removeItem('currentDiagramId');
       setElements([]);
       setConnections([]);
       setTitle('Component Diagram');
+      setSelectedElement(null);
+      setSelectedConnection(null);
     }
   }, [diagramId]);
 
@@ -730,8 +735,8 @@ export default function ComponentDiagramEditor() {
   }, [draggingEndpoint, connections, elements, canvasRef]);
 
   const handleSaveToDatabase = async () => {
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = currentDiagramId 
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId 
       ? title 
       : prompt('Enter diagram name:', title || 'Component Diagram');
     
@@ -756,10 +761,10 @@ export default function ComponentDiagramEditor() {
 
       let response, result, method, url;
       
-      if (currentDiagramId) {
+      if (activeDiagramId) {
         // UPDATE existing diagram
         method = 'PUT';
-        url = `http://localhost:5000/api/class-diagrams/${currentDiagramId}`;
+        url = `http://localhost:5000/api/class-diagrams/${activeDiagramId}`;
         response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
@@ -769,6 +774,7 @@ export default function ComponentDiagramEditor() {
         
         if (response.ok) {
           alert(`Diagram "${diagramTitle}" updated successfully!`);
+          setTitle(diagramTitle);
         }
       } else {
         // CREATE new diagram
@@ -789,6 +795,7 @@ export default function ComponentDiagramEditor() {
         
         if (response.ok) {
           alert(`Diagram "${diagramTitle}" saved successfully! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
           sessionStorage.setItem('currentDiagramId', result.diagramId);
           setTitle(diagramTitle);
         }
@@ -842,6 +849,8 @@ export default function ComponentDiagramEditor() {
           setElements(data.elements);
           setConnections(ensureConnectionOffsets(data.connections));
           setTitle(data.title || 'Imported Diagram');
+          setCurrentDiagramId(null);
+          sessionStorage.removeItem('currentDiagramId');
           setSelectedElement(null);
           setSelectedConnection(null);
           alert('✅ Diagram imported successfully!');

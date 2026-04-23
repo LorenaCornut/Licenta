@@ -1,6 +1,6 @@
 const pool = require('../db');
 
-// Salvează diagramă de automat (State Diagram) - inclusă în saveDiagram acum
+// Salvează diagramă de automat sau state machine - inclusă în saveDiagram acum
 exports.saveStateDiagram = async (req, res) => {
   // Redirect to saveDiagram
   exports.saveDiagram(req, res);
@@ -13,7 +13,11 @@ exports.saveDiagram = async (req, res) => {
   try {
     // Normalize diagram type names
     if (tipDiagrama === 'STATE_MACHINE_DIAGRAM') {
-      tipDiagrama = 'Automat - Diagrama Stări';
+      tipDiagrama = 'STATE_MACHINE_DIAGRAM';
+    }
+
+    if (tipDiagrama === 'Automat - Diagrama Stări') {
+      tipDiagrama = 'AUTOMAT';
     }
     
     if (!userId || !title) {
@@ -53,7 +57,10 @@ exports.saveDiagram = async (req, res) => {
     }
 
     // Determină dacă e state diagram sau graph
-    const isStateDiagram = tipDiagrama === 'Automat - Diagrama Stări' || elements || connections;
+    const isStateDiagram = tipDiagrama === 'AUTOMAT' ||
+      tipDiagrama === 'STATE_MACHINE_DIAGRAM' ||
+      tipDiagrama === 'Automat - Diagrama Stări' ||
+      elements || connections;
     
     // Folosește elements/connections dacă sunt disponibile, altfel nodes/edges
     const finalNodes = elements || nodes || [];

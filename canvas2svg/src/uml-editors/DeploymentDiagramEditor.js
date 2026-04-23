@@ -425,11 +425,14 @@ function DeploymentDiagramEditor() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveDialogTitle, setSaveDialogTitle] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [currentDiagramId, setCurrentDiagramId] = useState(null);
 
   // Load diagram if editing
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
+    } else {
+      setCurrentDiagramId(null);
     }
   }, [diagramId]);
 
@@ -767,7 +770,9 @@ function DeploymentDiagramEditor() {
         
         setElements(loadedElements);
         setConnections(loadedConnections);
-        sessionStorage.setItem('currentDiagramId', result.diagram.id);
+        const loadedDiagramId = result.diagram?.id || id;
+        setCurrentDiagramId(loadedDiagramId);
+        sessionStorage.setItem('currentDiagramId', loadedDiagramId);
       } else {
         alert(`Eroare la încărcare: ${result.message || 'Unknown error'}`);
       }
@@ -954,6 +959,54 @@ function DeploymentDiagramEditor() {
     setElements(elements.map(el => el.id === elementId ? { ...el, ...updates } : el));
   };
 
+  const saveDiagram = async ({ diagramTitle, diagramIdToUpdate = null }) => {
+    const userId = localStorage.getItem('userId');
+
+    try {
+      const payload = {
+        userId: parseInt(userId),
+        title: diagramTitle,
+        tipDiagrama: 'UML_DEPLOYMENT_DIAGRAM',
+        elements: elements,
+        connections: connections,
+        ...(diagramIdToUpdate && { diagramId: diagramIdToUpdate })
+      };
+
+      const response = await fetch('http://localhost:5000/api/diagrams/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const contentType = response.headers.get('content-type');
+      let result;
+
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        console.error('Server returned non-JSON response:', text);
+        return { ok: false, message: `Server error: ${response.statusText}` };
+      }
+
+      if (!response.ok) {
+        return { ok: false, message: result.message || 'Eroare la salvare!' };
+      }
+
+      const persistedId = result.diagramId || diagramIdToUpdate;
+      if (persistedId) {
+        setCurrentDiagramId(persistedId);
+        sessionStorage.setItem('currentDiagramId', persistedId);
+      }
+
+      setTitle(diagramTitle);
+      return { ok: true, isUpdate: !!diagramIdToUpdate };
+    } catch (error) {
+      console.error('Error saving diagram:', error);
+      return { ok: false, message: `Eroare: ${error.message}` };
+    }
+  };
+
   const handleSaveToDatabase = async () => {
     const userId = localStorage.getItem('userId');
     if (!userId) {
@@ -961,7 +1014,22 @@ function DeploymentDiagramEditor() {
       return;
     }
 
-    // Show modal for name input
+    if (currentDiagramId) {
+      const effectiveTitle = (title || 'Deployment Diagram').trim();
+      const result = await saveDiagram({
+        diagramTitle: effectiveTitle,
+        diagramIdToUpdate: currentDiagramId
+      });
+
+      if (result.ok) {
+        alert('✅ Diagrama a fost actualizată cu succes!');
+      } else {
+        alert(result.message || 'Eroare la actualizare!');
+      }
+      return;
+    }
+
+    // For new diagrams, ask for a title first.
     setSaveDialogTitle(title || 'Deployment Diagram');
     setShowSaveModal(true);
     setSaveError('');
@@ -973,52 +1041,14 @@ function DeploymentDiagramEditor() {
       return;
     }
 
-    const userId = localStorage.getItem('userId');
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
-
-    try {
-      const diagramData = {
-        userId: parseInt(userId),
-        title: saveDialogTitle.trim(),
-        tipDiagrama: 'UML_DEPLOYMENT_DIAGRAM',
-        elements: elements,
-        connections: connections,
-        ...(currentDiagramId && { diagramId: currentDiagramId })
-      };
-
-      const response = await fetch('http://localhost:5000/api/diagrams/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(diagramData)
-      });
-
-      const contentType = response.headers.get('content-type');
-      let result;
-      
-      if (contentType && contentType.includes('application/json')) {
-        result = await response.json();
-      } else {
-        const text = await response.text();
-        console.error('Server returned non-JSON response:', text);
-        setSaveError(`Server error: ${response.statusText}`);
-        return;
-      }
-
-      if (response.ok) {
-        setTitle(saveDialogTitle.trim());
-        if (result.diagramId) {
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-        }
-        setShowSaveModal(false);
-        setSaveDialogTitle('');
-        setSaveError('');
-        alert('✅ Diagrama salvată cu succes!');
-      } else {
-        setSaveError(result.message || 'Eroare la salvare!');
-      }
-    } catch (error) {
-      console.error('Error saving diagram:', error);
-      setSaveError(`Eroare: ${error.message}`);
+    const result = await saveDiagram({ diagramTitle: saveDialogTitle.trim() });
+    if (result.ok) {
+      setShowSaveModal(false);
+      setSaveDialogTitle('');
+      setSaveError('');
+      alert('✅ Diagrama a fost salvată cu succes!');
+    } else {
+      setSaveError(result.message || 'Eroare la salvare!');
     }
   };
 
