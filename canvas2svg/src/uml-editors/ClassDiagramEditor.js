@@ -708,9 +708,9 @@ function ClassDiagramEditor() {
       ));
 
       // Update connections: move endpoints along with the element
+      // NOTE: Control points (waypoints) stay fixed - they don't move with the element
       setConnections(prevConnections =>
         prevConnections.map(conn => {
-          let updated = false;
           let newConn = { ...conn };
 
           // If this element is the FROM endpoint, move the fromPoint
@@ -723,7 +723,6 @@ function ClassDiagramEditor() {
                 y: conn.fromPoint.y + deltaY
               }
             };
-            updated = true;
           }
 
           // If this element is the TO endpoint, move the toPoint
@@ -736,19 +735,10 @@ function ClassDiagramEditor() {
                 y: conn.toPoint.y + deltaY
               }
             };
-            updated = true;
           }
 
-          // Also move control points if they exist
-          if (updated && conn.controlPoints && conn.controlPoints.length > 0) {
-            newConn = {
-              ...newConn,
-              controlPoints: conn.controlPoints.map(cp => ({
-                x: cp.x + deltaX,
-                y: cp.y + deltaY
-              }))
-            };
-          }
+          // Control points are NOT moved - they remain at their fixed positions
+          // This maintains the intermediate waypoints independently of element movement
 
           return newConn;
         })
@@ -1224,12 +1214,12 @@ function ClassDiagramEditor() {
       else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
       svg += `<path d='${pathD}' fill='none' stroke='#8b4513' stroke-width='2' marker-end='${marker}'/>\n`;
       
-      // Desenează cercuri pentru fiecare waypoint definit de utilizator (nu cele generate de rutare)
-      if (conn.controlPoints && Array.isArray(conn.controlPoints)) {
+      // Nu mai desenează cercuri de waypoint în export SVG
+      /* if (conn.controlPoints && Array.isArray(conn.controlPoints)) {
         conn.controlPoints.forEach(pt => {
           svg += `<circle cx='${pt.x}' cy='${pt.y}' r='6' fill='white' stroke='#8b4513' stroke-width='2'/>\n`;
         });
-      }
+      } */
     });
 
     // Render elements - EXACTLY LIKE UMLEditor
@@ -1801,8 +1791,8 @@ function ClassDiagramEditor() {
                     key={`endpoint-${conn.id}-${ep.label}`}
                     style={{
                       position: 'absolute',
-                      left: `${ep.point.x - size}px`,
-                      top: `${ep.point.y - size}px`,
+                      left: 0,
+                      top: 0,
                       width: `${size * 2}px`,
                       height: `${size * 2}px`,
                       borderRadius: '50%',
@@ -1811,9 +1801,10 @@ function ClassDiagramEditor() {
                       cursor: 'grab',
                       zIndex: isDragging ? 1000 : 950,
                       pointerEvents: 'auto',
-                      transition: isDragging ? 'none' : 'all 0.2s ease',
+                      transform: `translate(${ep.point.x - size}px, ${ep.point.y - size}px)`,
                       opacity: isDragging ? 1 : 0.8,
-                      boxShadow: isDragging ? '0 0 8px rgba(0,0,0,0.3)' : 'none'
+                      boxShadow: isDragging ? '0 0 8px rgba(0,0,0,0.3)' : 'none',
+                      transition: 'none'  // No transition - instant updates
                     }}
                     title={`${ep.label === 'from' ? 'From' : 'To'} endpoint - Drag to move on element edge`}
                     onMouseDown={(e) => {
@@ -1830,8 +1821,8 @@ function ClassDiagramEditor() {
               });
             })}
 
-            {/* Control points on connections - draggable circles */}
-            {connections.map((conn) => {
+            {/* Control points on connections - draggable circles - HIDDEN */}
+            {/* connections.map((conn) => {
               if (!conn.controlPoints || conn.controlPoints.length === 0) return null;
               
               return conn.controlPoints.map((cp, idx) => {
@@ -1883,7 +1874,7 @@ function ClassDiagramEditor() {
                   />
                 );
               });
-            })}
+            })} */}
           </div>
 
         {/* Right Properties Panel */}

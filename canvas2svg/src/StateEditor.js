@@ -20,6 +20,169 @@ const escapeXML = (str) => {
     .replace(/'/g, '&apos;');
 };
 
+/**
+ * Calculează distanța perpendiculară de la un punct la un segment
+ */
+function distancePointToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  
+  if (len2 === 0) {
+    return Math.hypot(px - x1, py - y1);
+  }
+  
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  
+  const closestX = x1 + t * dx;
+  const closestY = y1 + t * dy;
+  
+  return Math.hypot(px - closestX, py - closestY);
+}
+
+/**
+ * Determină dacă punctul e pe stânga sau dreapta unei linii
+ */
+function sideOfLine(px, py, x1, y1, x2, y2) {
+  const crossProduct = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+  return crossProduct > 0 ? 1 : -1;
+}
+
+/**
+ * Convertește o listă de puncte în SVG path smooth (Catmull-Rom Bezier)
+ */
+function pointsToSmoothPath(points) {
+  if (points.length < 2) return '';
+  
+  let d = `M ${points[0].x},${points[0].y}`;
+  
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = i > 0 ? points[i - 1] : points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = i < points.length - 2 ? points[i + 2] : p2;
+    
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+  }
+  
+  return d;
+}
+
+/**
+ * Evaluează o curbă Bezier pătratică la parametrul t ∈ [0,1]
+ */
+function evaluateBezier(t, p0, p1, cp1, cp2) {
+  const mt = 1 - t;
+  return mt * mt * mt * p0 + 3 * mt * mt * t * cp1 + 3 * mt * t * t * cp2 + t * t * t * p1;
+}
+
+/**
+ * Creează punctele unui triunghi pentru săgeață
+ * Vârful e pe marginea nodului, nu în centru
+ */
+function createArrowhead(arrowX, arrowY, direction, size = 15) {
+  const arrowTipX = arrowX;
+  const arrowTipY = arrowY;
+  
+  const arrowLength = 16;
+  const arrowBaseX = arrowTipX - direction.x * arrowLength;
+  const arrowBaseY = arrowTipY - direction.y * arrowLength;
+  
+  const perpX = -direction.y;
+  const perpY = direction.x;
+  
+  const p1 = `${arrowTipX},${arrowTipY}`;
+  const p2 = `${arrowBaseX - perpX * size},${arrowBaseY - perpY * size}`;
+  const p3 = `${arrowBaseX + perpX * size},${arrowBaseY + perpY * size}`;
+  
+  return `${p1} ${p2} ${p3}`;
+}
+
+/**
+ * Construiește un path Bezier care evită obstacolele și returnează info pentru săgeață
+ */
+function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = [], targetRadius = 40) {
+  const margin = 40;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist === 0) return { path: `M ${x1},${y1}`, direction: { x: 1, y: 0 }, arrowPoint: { x: x1, y: y1 } };
+
+  const ux = dx / dist;
+  const uy = dy / dist;
+
+  const obstacleNodes = allNodes
+    .filter(n => !excludeIds.includes(n.id))
+    .map(n => {
+      const nodeRadius = 45;
+      const d = distancePointToSegment(n.x + nodeRadius, n.y + nodeRadius, x1, y1, x2, y2);
+      const side = sideOfLine(n.x + nodeRadius, n.y + nodeRadius, x1, y1, x2, y2);
+      const dx_to_node = n.x - x1;
+      const dy_to_node = n.y - y1;
+      const t = (dx_to_node * dx + dy_to_node * dy) / (dist * dist);
+      const tClamped = Math.max(0, Math.min(1, t));
+      
+      return { node: n, d, side, t: tClamped, nodeRadius };
+    });
+
+  const controlPoints = [{ x: x1, y: y1 }];
+  
+  const obstaclesWithOffset = obstacleNodes
+    .filter(o => o.d < o.nodeRadius + margin)
+    .sort((a, b) => a.t - b.t);
+  
+  obstaclesWithOffset.forEach(obstacle => {
+    const t = obstacle.t;
+    const ptOnLine = {
+      x: x1 + ux * (dist * t),
+      y: y1 + uy * (dist * t)
+    };
+    
+    const offset = obstacle.nodeRadius + margin - obstacle.d;
+    const perpX = -uy;
+    const perpY = ux;
+    
+    const adjustedX = ptOnLine.x + perpX * offset * obstacle.side;
+    const adjustedY = ptOnLine.y + perpY * offset * obstacle.side;
+    
+    controlPoints.push({ x: adjustedX, y: adjustedY });
+  });
+
+  controlPoints.push({ x: x2, y: y2 });
+
+  // Construiește path smooth cu Catmull-Rom Bezier curves
+  const pathD = pointsToSmoothPath(controlPoints);
+  
+  // Calculez direcția și punctul de săgeată
+  let direction = { x: ux, y: uy };
+  let arrowPoint = { x: x2 - ux * targetRadius, y: y2 - uy * targetRadius };
+  
+  // Dacă avem mai mult de 2 puncte de control, calculez direcția din ultimul segment
+  if (controlPoints.length >= 2) {
+    const lastIdx = controlPoints.length - 1;
+    const p1 = controlPoints[lastIdx - 1];
+    const p2 = controlPoints[lastIdx];
+    
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const dist = Math.hypot(dx, dy);
+    
+    if (dist > 0) {
+      direction = { x: dx / dist, y: dy / dist };
+      arrowPoint = { x: p2.x - direction.x * targetRadius, y: p2.y - direction.y * targetRadius };
+    }
+  }
+  
+  return { path: pathD, direction, arrowPoint };
+}
+
 const StateEditor = () => {
   const navigate = useNavigate();
   const { diagramId } = useParams();
@@ -264,8 +427,7 @@ const StateEditor = () => {
   const downloadSVG = () => {
     let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" style="background-color: white;">\n';
     
-    // Add marker definition
-    svg += '<defs><marker id="arrowhead" markerWidth="15" markerHeight="15" refX="12" refY="7.5" orient="auto"><polygon points="0 0, 15 7.5, 0 15" fill="#7c3aed" /></marker></defs>\n';
+    // No marker definition needed - we draw arrowheads as polygons
 
     // Draw connections
     connections.forEach(conn => {
@@ -278,24 +440,6 @@ const StateEditor = () => {
       const fromY = fromEl.y + (fromEl.height || 100) / 2;
       const toX = toEl.x + (toEl.width || 100) / 2;
       const toY = toEl.y + (toEl.height || 100) / 2;
-      
-      // Calculate angle and direction
-      const dx = toX - fromX;
-      const dy = toY - fromY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx);
-      
-      // Calculate radius based on element size (same as React editor)
-      const fromW = fromEl.width || 100;
-      const fromH = fromEl.height || 100;
-      const toW = toEl.width || 100;
-      const toH = toEl.height || 100;
-      
-      const fromRadius = Math.min(fromW, fromH) / 2 - 3; // -3 for stroke
-      const toRadius = Math.min(toW, toH) / 2 - 3;
-      
-      const radiusStart = fromRadius + 2; // +2 to account for stroke width
-      const radiusEnd = toRadius + 2;
 
       // Self-loop case
       if (fromEl.id === toEl.id) {
@@ -305,13 +449,11 @@ const StateEditor = () => {
         const isBottomLoop = conn.loopDirection === 'bottom';
         const directionMultiplier = isBottomLoop ? -1 : 1;
         
-        // Start and end points on the node's edge
         const startX = fromX + nodeRadius * 0.6;
         const startY = fromY - nodeRadius * 0.5 * directionMultiplier;
         const endX = fromX - nodeRadius * 0.6;
         const endY = fromY - nodeRadius * 0.5 * directionMultiplier;
         
-        // Control points for a nice arc (above or below the node)
         const controlX1 = fromX + nodeRadius + 30;
         const controlY1 = fromY - nodeRadius * directionMultiplier - 40 * directionMultiplier;
         const controlX2 = fromX - nodeRadius - 30;
@@ -320,68 +462,62 @@ const StateEditor = () => {
         const textCenterX = fromX;
         const textCenterY = fromY - nodeRadius * directionMultiplier - 50 * directionMultiplier;
         
-        svg += `<path d='M ${startX} ${startY} C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${endX} ${endY}' stroke='#7c3aed' stroke-width='2' fill='none' marker-end='url(#arrowhead)'/>\n`;
+        svg += `<path d='M ${startX} ${startY} C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${endX} ${endY}' stroke='#7c3aed' stroke-width='2' fill='none'/>\n`;
+        
+        // Arrowhead on loop end
+        const arrowDirX = -nodeRadius * 0.6;
+        const arrowDirLen = Math.hypot(arrowDirX, -nodeRadius * 0.5 * directionMultiplier);
+        const arrowDirXNorm = arrowDirX / arrowDirLen;
+        const arrowDirYNorm = (-nodeRadius * 0.5 * directionMultiplier) / arrowDirLen;
+        
+        const arrowLength = 16;
+        const arrowBaseX = endX - arrowDirXNorm * arrowLength;
+        const arrowBaseY = endY - arrowDirYNorm * arrowLength;
+        const perpX = -arrowDirYNorm;
+        const perpY = arrowDirXNorm;
+        const arrowSize = 13;
+        
+        const p1 = `${endX},${endY}`;
+        const p2 = `${arrowBaseX - perpX * arrowSize},${arrowBaseY - perpY * arrowSize}`;
+        const p3 = `${arrowBaseX + perpX * arrowSize},${arrowBaseY + perpY * arrowSize}`;
+        
+        svg += `<polygon points='${p1} ${p2} ${p3}' fill='#7c3aed' stroke='#6d28d9' stroke-width='0.5'/>\n`;
+        
         if (conn.label) {
           svg += `<text x='${textCenterX}' y='${textCenterY}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#7c3aed' font-weight='600'>${escapeXML(conn.label)}</text>\n`;
         }
       } else {
-        // Calculate points on circumference
-        const lineStartX = fromX + radiusStart * Math.cos(angle);
-        const lineStartY = fromY + radiusStart * Math.sin(angle);
-        const lineEndX = toX - radiusEnd * Math.cos(angle);
-        const lineEndY = toY - radiusEnd * Math.sin(angle);
-        
-        // Check for bidirectional connection
-        const reverseConn = connections.find(c => 
-          c.fromId === toEl.id && c.toId === fromEl.id
+        // Normal connection - use smoothed path
+        const result = buildSmoothedPath(
+          fromX, fromY, toX, toY,
+          elements,
+          [conn.fromId, conn.toId],
+          40
         );
-        const isBidirectional = !!reverseConn;
         
-        let pathD;
-        let labelX = (lineStartX + lineEndX) / 2;
-        let labelY = (lineStartY + lineEndY) / 2 + 15;
+        const pathD = result.path;
+        const direction = result.direction;
+        const arrowPoint = result.arrowPoint;
         
-        if (isBidirectional) {
-          // Bezier curve - same logic as editor
-          let perpX = -Math.sin(angle);
-          let perpY = Math.cos(angle);
-          
-          // If backward connection, invert perpendicular
-          if (conn.fromId > conn.toId) {
-            perpX = -perpX;
-            perpY = -perpY;
-          }
-          
-          // Midpoint at 50% of line
-          const midX = (lineStartX + lineEndX) / 2;
-          const midY = (lineStartY + lineEndY) / 2;
-          
-          // Control point offset
-          const controlOffset = 60;
-          
-          // S1→S2: offsetFactor = -1 (pull down)
-          // S2→S1: offsetFactor = 1 (pull up)
-          const offsetFactor = conn.fromId < conn.toId ? -1 : 1;
-          
-          const controlX = midX + perpX * controlOffset * offsetFactor;
-          const controlY = midY + perpY * controlOffset * offsetFactor;
-          
-          // Quadratic Bezier curve
-          pathD = `M ${lineStartX} ${lineStartY} Q ${controlX} ${controlY} ${lineEndX} ${lineEndY}`;
-          
-          // Label positioning
-          labelX = controlX;
-          if (conn.fromId < conn.toId) {
-            labelY = controlY + 20;
-          } else {
-            labelY = controlY - 20;
-          }
-        } else {
-          // Straight line
-          pathD = `M ${lineStartX} ${lineStartY} L ${lineEndX} ${lineEndY}`;
-        }
+        svg += `<path d='${pathD}' stroke='#7c3aed' stroke-width='2' fill='none'/>\n`;
         
-        svg += `<path d='${pathD}' stroke='#7c3aed' stroke-width='2' fill='none' marker-end='url(#arrowhead)'/>\n`;
+        // Arrowhead polygon on contour
+        const arrowLength = 16;
+        const arrowBaseX = arrowPoint.x - direction.x * arrowLength;
+        const arrowBaseY = arrowPoint.y - direction.y * arrowLength;
+        const perpX = -direction.y;
+        const perpY = direction.x;
+        const arrowSize = 13;
+        
+        const p1 = `${arrowPoint.x},${arrowPoint.y}`;
+        const p2 = `${arrowBaseX - perpX * arrowSize},${arrowBaseY - perpY * arrowSize}`;
+        const p3 = `${arrowBaseX + perpX * arrowSize},${arrowBaseY + perpY * arrowSize}`;
+        
+        svg += `<polygon points='${p1} ${p2} ${p3}' fill='#7c3aed' stroke='#6d28d9' stroke-width='0.5'/>\n`;
+        
+        // Label positioning
+        const labelX = (fromX + toX) / 2;
+        const labelY = (fromY + toY) / 2 - 15;
         
         if (conn.label) {
           svg += `<text x='${labelX}' y='${labelY}' font-size='12' font-family='Arial, sans-serif' text-anchor='middle' fill='#7c3aed' font-weight='600'>${escapeXML(conn.label)}</text>\n`;
@@ -893,76 +1029,24 @@ const StateEditor = () => {
               );
             }
 
-            // Normal connection
-            const dx = toX - fromX;
-            const dy = toY - fromY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const angle = Math.atan2(dy, dx);
-            
-            // Radius of circle (from SVG r="40")
-            const radiusStart = 41; // Start point on edge
-            const radiusEnd = 43; // End point adjusted for arrow on edge
-            
-            // Calculate start point on circumference
-            const startX = fromX + radiusStart * Math.cos(angle);
-            const startY = fromY + radiusStart * Math.sin(angle);
-            
-            // Calculate end point on circumference
-            const endX = toX - radiusEnd * Math.cos(angle);
-            const endY = toY - radiusEnd * Math.sin(angle);
-            
-            // Check if there's a reverse connection (bidirectional)
-            const reverseConn = connections.find(c => 
-              c.fromId === toEl.id && c.toId === fromEl.id
+            // Normal connection - use smoothed path to avoid obstacles
+            const result = buildSmoothedPath(
+              fromX, fromY, toX, toY, 
+              elements, 
+              [conn.fromId, conn.toId],  // Exclude both connected nodes
+              40  // target radius for STATE circles
             );
-            const isBidirectional = !!reverseConn;
             
-            // Determine path: straight if single direction, curve if bidirectional
-            let pathD;
-            let labelX = (startX + endX) / 2;
-            let labelY = (startY + endY) / 2 + 15;
+            const pathD = result.path;
+            const direction = result.direction;
+            const arrowPoint = result.arrowPoint;
             
-            if (isBidirectional) {
-              // Bezier curve - pull in opposite directions
-              let perpX = -Math.sin(angle);
-              let perpY = Math.cos(angle);
-              
-              // If this is a "backward" connection (fromId > toId), invert the perpendicular
-              if (conn.fromId > conn.toId) {
-                perpX = -perpX;
-                perpY = -perpY;
-              }
-              
-              // Midpoint at 50% of line
-              const midX = (startX + endX) / 2;
-              const midY = (startY + endY) / 2;
-              
-              // Control point offset
-              const controlOffset = 60;
-              
-              // S1→S2: offsetFactor = -1 (pull in -perpendicular direction)
-              // S2→S1: offsetFactor = 1 (pull in +perpendicular direction)
-              const offsetFactor = conn.fromId < conn.toId ? -1 : 1;
-              
-              const controlX = midX + perpX * controlOffset * offsetFactor;
-              const controlY = midY + perpY * controlOffset * offsetFactor;
-              
-              // Quadratic Bezier curve
-              pathD = `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
-              
-              // Label positioning - above or below control point based on direction
-              labelX = controlX;
-              if (conn.fromId < conn.toId) {
-                // S1→S2: label BELOW control point
-                labelY = controlY + 20;
-              } else {
-                // S2→S1: label ABOVE control point
-                labelY = controlY - 20;
-              }
-            } else {
-              // Straight line (single direction, no reverse)
-              pathD = `M ${startX} ${startY} L ${endX} ${endY}`;
-            }
+            // Calculate label position - center of path
+            const labelX = (fromX + toX) / 2;
+            const labelY = (fromY + toY) / 2 - 15;
+            
+            // Create arrowhead polygon
+            const arrowPoints = createArrowhead(arrowPoint.x, arrowPoint.y, direction, 13);
             
             return (
               <g 
@@ -973,7 +1057,12 @@ const StateEditor = () => {
                   setEditConnectionLabel(conn.label);
                 }}
               >
-                <path d={pathD} stroke="#7c3aed" strokeWidth="2" fill="none" markerEnd="url(#arrowhead)" />
+                {/* Invisible thick path for easier clicking */}
+                <path d={pathD} stroke="transparent" strokeWidth="15" fill="none" pointerEvents="auto" />
+                {/* Visible path */}
+                <path d={pathD} stroke="#7c3aed" strokeWidth="2" fill="none" pointerEvents="auto" />
+                {/* Arrowhead on contour */}
+                <polygon points={arrowPoints} fill="#7c3aed" stroke="#6d28d9" strokeWidth="0.5" pointerEvents="auto" style={{ cursor: 'pointer' }} />
                 <text x={labelX} y={labelY} fontSize="12" fontFamily="Arial, sans-serif" textAnchor="middle" fill="#7c3aed" fontWeight="600" pointerEvents="auto">
                   {conn.label}
                 </text>
