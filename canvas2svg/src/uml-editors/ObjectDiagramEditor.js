@@ -1280,7 +1280,7 @@ function ObjectDiagramEditor() {
           </button>
           <h1>{title}</h1>
           <div className="header-actions">
-            <button className="btn-primary" onClick={handleSaveToDatabase}>💾 Save</button>
+            <button className="btn-primary" onClick={handleSaveToDatabase}>Salvare</button>
             <div className="dropdown-save">
               <button className="btn-secondary">Export ▼</button>
               <div className="dropdown-content">

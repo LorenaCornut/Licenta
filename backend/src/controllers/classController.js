@@ -196,7 +196,7 @@ exports.saveClassDiagram = async (req, res) => {
             toEdge: connection.toEdge,
             toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5
           }),
-          JSON.stringify(connection.waypoints || [])
+          JSON.stringify(connection.controlPoints || [])
         ]
       );
     }
@@ -442,7 +442,7 @@ exports.updateClassDiagram = async (req, res) => {
             toEdge: connection.toEdge,
             toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5
           }),
-          JSON.stringify(connection.controlPoints || connection.waypoints || [])
+          JSON.stringify(connection.controlPoints || [])
         ]
       );
     }

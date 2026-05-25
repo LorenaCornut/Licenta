@@ -1372,7 +1372,6 @@ function GraphEditor() {
     <div className="graph-toolbar" style={{ width: '100%', justifyContent: 'flex-start', margin: 5, paddingLeft: 240, marginBottom: 32 }}>
         <button className={`graph-toolbar-btn${addNodeMode ? ' active' : ''}`} onClick={handleAddNode}>Adaugă nod</button>
         <button className={`graph-toolbar-btn${addEdgeMode ? ' active' : ''}`} onClick={handleAddEdge}>Adaugă muchie</button>
-        <button className="graph-toolbar-btn">Șterge</button>
         <button className="graph-toolbar-btn" onClick={() => setShowResetModal(true)}>Reset</button>
         <button className="graph-toolbar-btn" onClick={() => fileInputRef.current?.click()}>Importă JSON</button>
         <input

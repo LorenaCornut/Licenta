@@ -886,9 +886,9 @@ function UseCaseDiagramEditor() {
         <button className="btn-back" onClick={() => navigate('/dashboard')}>← Back</button>
         <h1>{title}</h1>
         <div className="header-actions">
-          <button className="btn-primary" onClick={handleSaveToDatabase}>💾 Save to DB</button>
+          <button className="btn-primary" onClick={handleSaveToDatabase}>Salvare</button>
           <button className="btn-secondary" onClick={() => setExportDropdownOpen(!exportDropdownOpen)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', zIndex: 999 }}>
-            📊 Export ▼
+            Export ▼
             {exportDropdownOpen && (
               <div style={{ 
                 position: 'absolute', 
@@ -920,7 +920,7 @@ function UseCaseDiagramEditor() {
                   onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
-                  🎨 Export SVG
+                  Export SVG
                 </button>
                 <button 
                   onClick={() => { handleExportJSON(); setExportDropdownOpen(false); }} 
@@ -938,12 +938,12 @@ function UseCaseDiagramEditor() {
                   onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
-                  📥 Export JSON
+                  Export JSON
                 </button>
               </div>
             )}
           </button>
-          <button className="btn-secondary" onClick={handleImport}>📥 Import</button>
+          <button className="btn-secondary" onClick={handleImport}>Import</button>
         </div>
       </div>
 

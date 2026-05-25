@@ -1506,9 +1506,9 @@ function DeploymentDiagramEditor() {
         <button className="btn-back" onClick={() => navigate('/dashboard')}>← Back</button>
         <h1>{title}</h1>
         <div className="header-actions">
-          <button className="btn-primary" onClick={handleSaveToDatabase}>💾 Save to DB</button>
+          <button className="btn-primary" onClick={handleSaveToDatabase}>Salvare</button>
           <button className="btn-secondary" onClick={() => setExportDropdownOpen(!exportDropdownOpen)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', zIndex: 999 }}>
-            📊 Export ▼
+            Export ▼
             {exportDropdownOpen && (
               <div style={{ 
                 position: 'absolute', 
@@ -1540,7 +1540,7 @@ function DeploymentDiagramEditor() {
                   onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
-                  🎨 Export SVG
+                  Export SVG
                 </button>
                 <button 
                   onClick={() => { exportToJSON(); }} 
@@ -1558,12 +1558,12 @@ function DeploymentDiagramEditor() {
                   onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
-                  📥 Export JSON
+                  Export JSON
                 </button>
               </div>
             )}
           </button>
-          <button className="btn-secondary" onClick={handleImportJSON}>📤 Import</button>
+          <button className="btn-secondary" onClick={handleImportJSON}>Import</button>
         </div>
       </div>
 

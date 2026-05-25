@@ -1,6 +1,18 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import '../UMLEditor.css';
+
+// Helper: calculează distanța de la un punct la un segment
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), projX: x1, projY: y1, t: 0 };
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return { dist: Math.hypot(px - projX, py - projY), projX, projY, t };
+}
 
 // ============ ROUTING HELPER FUNCTIONS ============
 
@@ -98,133 +110,104 @@ function buildOrthogonalPathThroughWaypoints(waypoints) {
 /**
  * Find path around obstacles with perpendicular approach to target edge
  */
+
+
+// Lee/BFS grid-based orthogonal routing for UML edges
 function findPathAroundObstacles(x1, y1, x2, y2, elements, excludeIds = [], targetEdge = null) {
-  const path = [{ x: x1, y: y1 }];
-  
+  // Grid params
+  const GRID_SIZE = 10;
+  const CANVAS_W = 2000;
+  const CANVAS_H = 1200;
   const obstacles = elements
     .filter(el => !excludeIds.includes(el.id))
     .map(el => getElementBounds(el));
 
-  let directPathClear = true;
-  for (const obstacle of obstacles) {
-    if (lineIntersectsRect(x1, y1, x2, y2, obstacle)) {
-      directPathClear = false;
-      break;
-    }
-  }
-
-  if (directPathClear) {
-    // Direct path is clear - use Manhattan routing with perpendicular approach
-    if (targetEdge === 'top' || targetEdge === 'bottom') {
-      path.push({ x: x2, y: y1 });
-      path.push({ x: x2, y: y2 });
-    } else if (targetEdge === 'left' || targetEdge === 'right') {
-      path.push({ x: x1, y: y2 });
-      path.push({ x: x2, y: y2 });
-    } else {
-      const midX = x1 + (x2 - x1) * 0.5;
-      path.push({ x: midX, y: y1 });
-      path.push({ x: midX, y: y2 });
-      path.push({ x: x2, y: y2 });
-    }
-    return path;
-  }
-
-  // Obstacles in the way - route around them
-  const blockingObstacles = obstacles.filter(obs => lineIntersectsRect(x1, y1, x2, y2, obs));
-  
-  if (blockingObstacles.length === 0) {
-    const midX = x1 + (x2 - x1) * 0.5;
-    path.push({ x: midX, y: y1 });
-    path.push({ x: midX, y: y2 });
-    path.push({ x: x2, y: y2 });
-    return path;
-  }
-
-  // Find closest obstacle
-  const closestObstacle = blockingObstacles.reduce((closest, obs) => {
-    const distToStart = Math.hypot(
-      (obs.x + obs.width / 2) - x1,
-      (obs.y + obs.height / 2) - y1
-    );
-    const closestDist = Math.hypot(
-      (closest.x + closest.width / 2) - x1,
-      (closest.y + closest.height / 2) - y1
-    );
-    return distToStart < closestDist ? obs : closest;
-  });
-
-  const padding = 20;
-  const strategies = [];
-
-  // Try different routing strategies
-  strategies.push({ 
-    route: [
-      { x: closestObstacle.x + closestObstacle.width + padding, y: y1 },
-      { x: closestObstacle.x + closestObstacle.width + padding, y: y2 }
-    ]
-  });
-
-  strategies.push({
-    route: [
-      { x: closestObstacle.x - padding, y: y1 },
-      { x: closestObstacle.x - padding, y: y2 }
-    ]
-  });
-
-  strategies.push({
-    route: [
-      { x: x1, y: closestObstacle.y - padding },
-      { x: x2, y: closestObstacle.y - padding }
-    ]
-  });
-
-  strategies.push({
-    route: [
-      { x: x1, y: closestObstacle.y + closestObstacle.height + padding },
-      { x: x2, y: closestObstacle.y + closestObstacle.height + padding }
-    ]
-  });
-
-  let bestRoute = strategies[0].route;
-  
-  for (const strategy of strategies) {
-    let routeValid = true;
-    for (let i = 0; i < strategy.route.length; i++) {
-      const segStart = i === 0 ? { x: x1, y: y1 } : strategy.route[i - 1];
-      const segEnd = strategy.route[i];
-      
-      if (lineIntersectsRect(segStart.x, segStart.y, segEnd.x, segEnd.y, closestObstacle)) {
-        routeValid = false;
-        break;
+  // Build grid: 0 = free, 1 = obstacle
+  const cols = Math.ceil(CANVAS_W / GRID_SIZE);
+  const rows = Math.ceil(CANVAS_H / GRID_SIZE);
+  const grid = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (const obs of obstacles) {
+    const left = Math.floor((obs.x - 10) / GRID_SIZE);
+    const right = Math.ceil((obs.x + obs.width + 10) / GRID_SIZE);
+    const top = Math.floor((obs.y - 10) / GRID_SIZE);
+    const bottom = Math.ceil((obs.y + obs.height + 10) / GRID_SIZE);
+    for (let i = top; i <= bottom; i++) {
+      for (let j = left; j <= right; j++) {
+        if (i >= 0 && i < rows && j >= 0 && j < cols) {
+          grid[i][j] = 1;
+        }
       }
     }
-    
-    if (routeValid) {
-      bestRoute = strategy.route;
+  }
+
+  // Convert (x, y) to grid cell
+  function toCell(x, y) {
+    return [Math.round(y / GRID_SIZE), Math.round(x / GRID_SIZE)];
+  }
+  function toCoord(row, col) {
+    return { x: col * GRID_SIZE, y: row * GRID_SIZE };
+  }
+
+  const [startRow, startCol] = toCell(x1, y1);
+  const [endRow, endCol] = toCell(x2, y2);
+
+  // BFS
+  const queue = [[startRow, startCol]];
+  const prev = Array.from({ length: rows }, () => Array(cols).fill(null));
+  grid[startRow][startCol] = 0; // ensure start is free
+  let found = false;
+  const DIRS = [
+    [0, 1], [1, 0], [0, -1], [-1, 0]
+  ]; // right, down, left, up
+  while (queue.length > 0) {
+    const [r, c] = queue.shift();
+    if (r === endRow && c === endCol) {
+      found = true;
       break;
+    }
+    for (const [dr, dc] of DIRS) {
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && grid[nr][nc] === 0 && !prev[nr][nc]) {
+        prev[nr][nc] = [r, c];
+        queue.push([nr, nc]);
+      }
     }
   }
 
-  for (const wp of bestRoute) {
-    path.push(wp);
+  // Reconstruct path
+  let waypoints = [{ x: x1, y: y1 }];
+  if (found) {
+    let pathCells = [];
+    let cur = [endRow, endCol];
+    while (cur && (cur[0] !== startRow || cur[1] !== startCol)) {
+      pathCells.push(cur);
+      cur = prev[cur[0]][cur[1]];
+    }
+    pathCells.reverse();
+    for (const [r, c] of pathCells) {
+      waypoints.push(toCoord(r, c));
+    }
+  } else {
+    // fallback: direct
+    waypoints.push({ x: x2, y: y2 });
   }
-  
-  // Add perpendicular approach to target edge
-  const lastWaypoint = bestRoute[bestRoute.length - 1];
-  
+
+  // Add perpendicular approach to target edge if needed
   if (targetEdge === 'top' || targetEdge === 'bottom') {
-    if (Math.abs(lastWaypoint.x - x2) > 1) {
-      path.push({ x: x2, y: lastWaypoint.y });
+    const last = waypoints[waypoints.length - 1];
+    if (Math.abs(last.x - x2) > 1) {
+      waypoints.push({ x: x2, y: last.y });
     }
   } else if (targetEdge === 'left' || targetEdge === 'right') {
-    if (Math.abs(lastWaypoint.y - y2) > 1) {
-      path.push({ x: lastWaypoint.x, y: y2 });
+    const last = waypoints[waypoints.length - 1];
+    if (Math.abs(last.y - y2) > 1) {
+      waypoints.push({ x: last.x, y: y2 });
     }
   }
-  
-  path.push({ x: x2, y: y2 });
-  return path;
+  if (waypoints[waypoints.length - 1].x !== x2 || waypoints[waypoints.length - 1].y !== y2) {
+    waypoints.push({ x: x2, y: y2 });
+  }
+  return waypoints;
 }
 
 /**
@@ -347,6 +330,94 @@ function detectConnectionPointOnContour(e, element) {
 // ============ END ROUTING HELPERS ============
 
 function ClassDiagramEditor() {
+  // ...existing code...
+  const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
+    // Adaugă punct intermediar pe muchie la dublu-click - doar pe segmentele user waypoints
+    const handleEdgeDoubleClick = (e, connection) => {
+      if (!connection) return;
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const fromEl = elements.find(el => el.id === connection.from);
+      const toEl = elements.find(el => el.id === connection.to);
+      if (!fromEl || !toEl) return;
+      
+      const fromPt = getConnectionPointForElement(fromEl, connection.fromPoint);
+      const toPt = getConnectionPointForElement(toEl, connection.toPoint);
+      const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
+      
+      // Construiește segmente doar din user waypoints: start -> pct1 -> pct2 -> ... -> end
+      const segmentPoints = [fromPt, ...userWps, toPt];
+      let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+      
+      for (let i = 0; i < segmentPoints.length - 1; i++) {
+        const { dist, projX, projY } = distanceToSegment(x, y, segmentPoints[i].x, segmentPoints[i].y, segmentPoints[i+1].x, segmentPoints[i+1].y);
+        if (dist < minDist) {
+          minDist = dist;
+          insertIdx = i; // Inserează după segmentul i (adică la pozitia i în user waypoints)
+          bestProj = { x: projX, y: projY };
+        }
+      }
+      
+      // Adaugă punctul la poziția corectă în user waypoints
+      const newConnections = connections.map(c => {
+        if (c.id !== connection.id) return c;
+        const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+        newWps.splice(insertIdx, 0, bestProj); // Inserează la poziția insertIdx
+        return { ...c, controlPoints: newWps };
+      });
+      setConnections(newConnections);
+    };
+
+    // Drag waypoint
+    const handleWaypointMouseDown = (e, connectionId, idx) => {
+      e.stopPropagation();
+      setDraggingWaypoint({ connectionId, idx });
+    };
+
+    // Șterge waypoint la Alt+click
+    const handleWaypointClick = (e, connectionId, idx) => {
+      if (!e.altKey) return;
+      setConnections(connections => connections.map(c => {
+        if (c.id !== connectionId) return c;
+        const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+        newWps.splice(idx, 1);
+        return { ...c, controlPoints: newWps };
+      }));
+    };
+
+    // Returnează waypoints: capăt start + user + capăt end
+    function getConnectionWaypoints(connection) {
+      // capăt start
+      const fromEl = elements.find(el => el.id === connection.from);
+      const toEl = elements.find(el => el.id === connection.to);
+      if (!fromEl || !toEl) return [];
+      const fromPt = getConnectionPointForElement(fromEl, connection.fromPoint);
+      const toPt = getConnectionPointForElement(toEl, connection.toPoint);
+      const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
+      // Dacă nu există puncte intermediare, folosește rutarea completă
+      if (userWps.length === 0) {
+        return findPathAroundObstacles(
+          fromPt.x, fromPt.y, toPt.x, toPt.y,
+          elements, [connection.from, connection.to], connection.toPoint?.point
+        );
+      }
+      // Altfel, rutează fiecare segment între puncte fixe
+      const allPoints = [fromPt, ...userWps, toPt];
+      let result = [allPoints[0]];
+      for (let i = 0; i < allPoints.length - 1; i++) {
+        const seg = findPathAroundObstacles(
+          allPoints[i].x, allPoints[i].y, allPoints[i+1].x, allPoints[i+1].y,
+          elements, [connection.from, connection.to],
+          (i === allPoints.length - 2) ? connection.toPoint?.point : null
+        );
+        // evită duplicarea punctului de start
+        result = result.concat(seg.slice(1));
+      }
+      return result;
+    }
   const { diagramId } = useParams();
   const navigate = useNavigate();
   
@@ -378,6 +449,7 @@ function ClassDiagramEditor() {
   const [draggedType, setDraggedType] = useState(null);
   const [draggingInCanvas, setDraggingInCanvas] = useState(false);
   const [draggingControlPoint, setDraggingControlPoint] = useState(null); // {connectionId, pointIndex, startX, startY}
+  const [draggingEndpoint, setDraggingEndpoint] = useState(null); // {connectionId, isStart: boolean, startX, startY}
   const [selectedConnection, setSelectedConnection] = useState(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -443,7 +515,7 @@ function ClassDiagramEditor() {
   const handleAddAttribute = (e, elementId) => {
     e.stopPropagation();
     const el = elements.find(elem => elem.id === elementId);
-    if (!el || (el.type !== 'CLASS' && el.type !== 'INTERFACE')) return;
+    if (!el || el.type !== 'CLASS') return;
     if (editingMember) handleSaveMember(false);
     
     const newAttrs = [...(el.attributes || []), '-newAttr: Type'];
@@ -494,7 +566,7 @@ function ClassDiagramEditor() {
     const defaultMethod = '+method(): void';
     
     if (type === 'attribute') {
-      if (currentEl.type !== 'CLASS' && currentEl.type !== 'INTERFACE') return;
+      if (currentEl.type !== 'CLASS') return;
       const newAttrs = [...(currentEl.attributes || [])];
       if (editMemberValue.trim()) {
         newAttrs[index] = editMemberValue;
@@ -625,11 +697,62 @@ function ClassDiagramEditor() {
         return; // Do not allow movement if it would cause overlap
       }
       
+      // Calculate delta movement
+      const deltaX = newX - draggedElement.x;
+      const deltaY = newY - draggedElement.y;
+      
       setElements(elements.map(el =>
         el.id === draggingElement
           ? { ...el, x: newX, y: newY }
           : el
       ));
+
+      // Update connections: move endpoints along with the element
+      setConnections(prevConnections =>
+        prevConnections.map(conn => {
+          let updated = false;
+          let newConn = { ...conn };
+
+          // If this element is the FROM endpoint, move the fromPoint
+          if (conn.from === draggingElement && conn.fromPoint) {
+            newConn = {
+              ...newConn,
+              fromPoint: {
+                ...conn.fromPoint,
+                x: conn.fromPoint.x + deltaX,
+                y: conn.fromPoint.y + deltaY
+              }
+            };
+            updated = true;
+          }
+
+          // If this element is the TO endpoint, move the toPoint
+          if (conn.to === draggingElement && conn.toPoint) {
+            newConn = {
+              ...newConn,
+              toPoint: {
+                ...conn.toPoint,
+                x: conn.toPoint.x + deltaX,
+                y: conn.toPoint.y + deltaY
+              }
+            };
+            updated = true;
+          }
+
+          // Also move control points if they exist
+          if (updated && conn.controlPoints && conn.controlPoints.length > 0) {
+            newConn = {
+              ...newConn,
+              controlPoints: conn.controlPoints.map(cp => ({
+                x: cp.x + deltaX,
+                y: cp.y + deltaY
+              }))
+            };
+          }
+
+          return newConn;
+        })
+      );
     };
 
     const handleMouseUp = () => {
@@ -731,6 +854,52 @@ function ClassDiagramEditor() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [resizing, elements]);
+
+  // Handle dragging waypoints with automatic reordering
+  useEffect(() => {
+    if (!draggingWaypoint) return;
+    const handleMove = (e) => {
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setConnections(connections => connections.map(c => {
+        if (c.id !== draggingWaypoint.connectionId) return c;
+        const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+        newWps[draggingWaypoint.idx] = { x, y };
+        
+        // Sortează waypoints după poziția lor pe linia de conexiune
+        const fromEl = elements.find(el => el.id === c.from);
+        const toEl = elements.find(el => el.id === c.to);
+        if (fromEl && toEl) {
+          const fromPt = getConnectionPointForElement(fromEl, c.fromPoint);
+          const toPt = getConnectionPointForElement(toEl, c.toPoint);
+          const dx = toPt.x - fromPt.x;
+          const dy = toPt.y - fromPt.y;
+          const l2 = dx * dx + dy * dy;
+          
+          if (l2 > 0) {
+            newWps.sort((a, b) => {
+              const tA = ((a.x - fromPt.x) * dx + (a.y - fromPt.y) * dy) / l2;
+              const tB = ((b.x - fromPt.x) * dx + (b.y - fromPt.y) * dy) / l2;
+              return tA - tB;
+            });
+          }
+        }
+        
+        return { ...c, controlPoints: newWps };
+      }));
+    };
+    const handleUp = () => {
+      setDraggingWaypoint(null);
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [draggingWaypoint, elements]);
 
   const handleCanvasClick = () => {
     setSelectedElement(null);
@@ -857,13 +1026,68 @@ function ClassDiagramEditor() {
     };
   }, [draggingControlPoint, connections]);
 
+  // Handle endpoint dragging
+  useEffect(() => {
+    const handleEndpointMove = (e) => {
+      if (!draggingEndpoint) return;
+
+      const { connectionId, isStart, startX, startY } = draggingEndpoint;
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      if (!canvasRect) return;
+
+      const mouseX = e.clientX - canvasRect.left;
+      const mouseY = e.clientY - canvasRect.top;
+
+      setConnections(prevConnections => {
+        return prevConnections.map(conn => {
+          if (conn.id === connectionId) {
+            const targetElementId = isStart ? conn.from : conn.to;
+            const targetElement = elements.find(el => el.id === targetElementId);
+            if (!targetElement) return conn;
+
+            // Detect connection point on the target element
+            const fakeEvent = { clientX: e.clientX, clientY: e.clientY };
+            const newPoint = detectConnectionPointOnContour(fakeEvent, targetElement);
+            if (!newPoint) return conn;
+
+            if (isStart) {
+              return { ...conn, fromPoint: newPoint };
+            } else {
+              return { ...conn, toPoint: newPoint };
+            }
+          }
+          return conn;
+        });
+      });
+    };
+
+    const handleEndpointUp = () => {
+      setDraggingEndpoint(null);
+    };
+
+    if (draggingEndpoint) {
+      window.addEventListener('mousemove', handleEndpointMove);
+      window.addEventListener('mouseup', handleEndpointUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleEndpointMove);
+      window.removeEventListener('mouseup', handleEndpointUp);
+    };
+  }, [draggingEndpoint, connections, elements]);
+
   // Helper function to prepare connections with waypoints for save
   const prepareDiagramForSave = () => {
-    // Convert controlPoints to waypoints for consistency
+    // Salvează explicit controlPoints (puncte intermediare definite de utilizator)
     return connections.map(conn => {
       return {
-        ...conn,
-        waypoints: conn.controlPoints || conn.waypoints || []
+        id: conn.id,
+        from: conn.from,
+        to: conn.to,
+        type: conn.type,
+        fromPoint: conn.fromPoint,
+        toPoint: conn.toPoint,
+        controlPoints: Array.isArray(conn.controlPoints) ? [...conn.controlPoints] : []
       };
     });
   };
@@ -884,12 +1108,11 @@ function ClassDiagramEditor() {
         return;
       }
 
+      // Pregătește datele diagramei cu conexiuni și waypoints-uri
       const diagramData = {
-        diagram: {
-          selectedType: 'CLASS',
-          elements: elements,
-          connections: prepareDiagramForSave()
-        }
+        selectedType: 'CLASS',
+        elements: elements,
+        connections: prepareDiagramForSave()
       };
 
       let response, result, method, url;
@@ -901,7 +1124,7 @@ function ClassDiagramEditor() {
         response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(diagramData)
+          body: JSON.stringify({ diagram: diagramData })
         });
         result = await response.json();
 
@@ -916,7 +1139,7 @@ function ClassDiagramEditor() {
         const newDiagramData = {
           title: diagramTitle,
           userId: parseInt(userId),
-          ...diagramData
+          diagram: diagramData
         };
 
         response = await fetch(url, {
@@ -989,122 +1212,108 @@ function ClassDiagramEditor() {
       </marker>
     </defs>\n`;
 
-    // Render connections with orthogonal routing - recalculate based on current positions
+    // Render connections identic cu editorul (inclusiv puncte intermediare și evitarea)
     connections.forEach(conn => {
-      const fromEl = elements.find(el => el.id === conn.from);
-      const toEl = elements.find(el => el.id === conn.to);
-      if (!fromEl || !toEl) return;
-
-      let fromX, fromY, toX, toY, targetEdge;
-      
-      if (conn.fromPoint && conn.toPoint) {
-        // Recalculate using stored edge+offset with current element positions
-        const fromPt = getConnectionPointForElement(fromEl, conn.fromPoint);
-        const toPt = getConnectionPointForElement(toEl, conn.toPoint);
-        fromX = fromPt.x;
-        fromY = fromPt.y;
-        toX = toPt.x;
-        toY = toPt.y;
-        targetEdge = conn.toPoint.point;
-      } else {
-        // Fallback to center-to-center for old connections
-        fromX = fromEl.x + (fromEl.width || 200) / 2;
-        fromY = fromEl.y + (fromEl.height || 140) / 2;
-        toX = toEl.x + (toEl.width || 200) / 2;
-        toY = toEl.y + (toEl.height || 140) / 2;
-      }
-
-      // Build waypoints - use control points if available
-      let waypoints;
-      if (conn.controlPoints && conn.controlPoints.length > 0) {
-        // Use control points
-        waypoints = [{ x: fromX, y: fromY }, ...conn.controlPoints, { x: toX, y: toY }];
-      } else {
-        // Find path around obstacles
-        waypoints = findPathAroundObstacles(
-          fromX, fromY, toX, toY,
-          elements,
-          [conn.from, conn.to],
-          targetEdge
-        );
-      }
-
-      // Convert to orthogonal path
+      const waypoints = getConnectionWaypoints(conn);
+      if (!waypoints || waypoints.length < 2) return;
       const pathD = buildOrthogonalPathThroughWaypoints(waypoints);
-
       let marker = '';
       if (conn.type === 'INHERITANCE') marker = 'url(#arrowTriangle)';
       else if (conn.type === 'COMPOSITION') marker = 'url(#arrowDiamond)';
       else if (conn.type === 'AGGREGATION') marker = 'url(#arrowDiamondOpen)';
       else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
-
       svg += `<path d='${pathD}' fill='none' stroke='#8b4513' stroke-width='2' marker-end='${marker}'/>\n`;
+      
+      // Desenează cercuri pentru fiecare waypoint definit de utilizator (nu cele generate de rutare)
+      if (conn.controlPoints && Array.isArray(conn.controlPoints)) {
+        conn.controlPoints.forEach(pt => {
+          svg += `<circle cx='${pt.x}' cy='${pt.y}' r='6' fill='white' stroke='#8b4513' stroke-width='2'/>\n`;
+        });
+      }
     });
 
     // Render elements - EXACTLY LIKE UMLEditor
     elements.forEach(el => {
       const w = el.width || 200;
-      let h = el.height || 140;
+      const h = el.height || 140;
       const x = el.x;
       const y = el.y;
       
       if (el.type === 'CLASS' || el.type === 'INTERFACE') {
-        // Clase UML - folosește el.height exact ca în editor
-        const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
+        const isClass = el.type === 'CLASS';
+        const isInterface = el.type === 'INTERFACE';
         
-        // Box - folosește dimensiunea reală din editor
+        // Header height
+        const headerHeight = isInterface ? 50 : 36;
+        
+        // For INTERFACE: always 1 section (methods only)
+        // For CLASS: always 2 sections (attributes + methods)
+        const numSections = isClass ? 2 : 1;
+        const sectionHeight = (h - headerHeight) / numSections;
+        
+        // Box
         svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='6' fill='#fffef0' stroke='#8b4513' stroke-width='2'/>\n`;
         
         // Header
         svg += `<rect x='${x}' y='${y}' width='${w}' height='${headerHeight}' fill='#fff7e6' stroke='#8b4513' stroke-width='1'/>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + headerHeight / 2 + 6}' font-size='14' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
         
-        // Linie sub header
+        // Stereotype label for interface
+        if (isInterface) {
+          const stereoY = y + 15;
+          svg += `<text x='${x + w / 2}' y='${stereoY}' font-size='11' font-family='monospace' text-anchor='middle' fill='#666' font-style='italic'>&#171;interface&#187;</text>\n`;
+        }
+        
+        // Class/Interface name
+        const nameY = isInterface ? y + 35 : y + headerHeight / 2 + 6;
+        svg += `<text x='${x + w / 2}' y='${nameY}' font-size='14' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
+        
+        // Line under header
         svg += `<line x1='${x}' y1='${y + headerHeight}' x2='${x + w}' y2='${y + headerHeight}' stroke='#8b4513' stroke-width='1'/>\n`;
         
-        // Calculează spațiul disponibil pentru atribute și metode
-        const attrCount = el.attributes ? el.attributes.length : 0;
-        const methodCount = el.methods ? el.methods.length : 0;
-        const totalItems = attrCount + methodCount;
-        
-        // Spațiul disponibil după header
-        const availableHeight = h - headerHeight;
-        
-        // Distribuie spațiul: atributele ocupă proportional din spațiu
-        const attrSectionHeight = totalItems > 0 ? (availableHeight * attrCount) / totalItems : availableHeight / 2;
-        const methodSectionHeight = totalItems > 0 ? (availableHeight * methodCount) / totalItems : availableHeight / 2;
-        
-        // Atribute - distribuite pe înălțimea secțiunii
-        const attrSectionStart = y + headerHeight;
-        if (el.attributes && el.attributes.length) {
-          const itemHeight = attrSectionHeight / attrCount;
-          el.attributes.forEach((attr, i) => {
-            const textY = attrSectionStart + itemHeight * i + itemHeight / 2 + 4;
-            svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(attr)}</text>\n`;
-          });
+        if (isClass) {
+          // ATTRIBUTES SECTION
+          const attrSectionStart = y + headerHeight;
+          const attrSectionEnd = attrSectionStart + sectionHeight;
+          
+          if (el.attributes && el.attributes.length > 0) {
+            const itemHeight = sectionHeight / el.attributes.length;
+            el.attributes.forEach((attr, i) => {
+              const textY = attrSectionStart + itemHeight * i + itemHeight / 2 + 4;
+              svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(attr)}</text>\n`;
+            });
+          }
+          
+          // Line between attributes and methods (always rendered)
+          svg += `<line x1='${x}' y1='${attrSectionEnd}' x2='${x + w}' y2='${attrSectionEnd}' stroke='#8b4513' stroke-width='1'/>\n`;
+          
+          // METHODS SECTION
+          const methodSectionStart = attrSectionEnd;
+          
+          if (el.methods && el.methods.length > 0) {
+            const itemHeight = sectionHeight / el.methods.length;
+            el.methods.forEach((method, i) => {
+              const textY = methodSectionStart + itemHeight * i + itemHeight / 2 + 4;
+              svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(method)}</text>\n`;
+            });
+          }
+        } else {
+          // INTERFACE - METHODS SECTION ONLY
+          const methodSectionStart = y + headerHeight;
+          
+          if (el.methods && el.methods.length > 0) {
+            const itemHeight = sectionHeight / el.methods.length;
+            el.methods.forEach((method, i) => {
+              const textY = methodSectionStart + itemHeight * i + itemHeight / 2 + 4;
+              svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(method)}</text>\n`;
+            });
+          }
         }
-        
-        // Linie sub atribute
-        const attrSeparatorY = attrSectionStart + attrSectionHeight;
-        svg += `<line x1='${x}' y1='${attrSeparatorY}' x2='${x + w}' y2='${attrSeparatorY}' stroke='#8b4513' stroke-width='1'/>\n`;
-        
-        // Metode - distribuite pe înălțimea secțiunii
-        const methodSectionStart = attrSeparatorY;
-        if (el.methods && el.methods.length) {
-          const itemHeight = methodSectionHeight / methodCount;
-          el.methods.forEach((m, i) => {
-            const textY = methodSectionStart + itemHeight * i + itemHeight / 2 + 4;
-            svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(m)}</text>\n`;
-          });
-        }
-      } else {
-        svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='4' fill='${CLASS_ELEMENTS[el.type].color}' stroke='#8b4513' stroke-width='2'/>\n`;
-        svg += `<text x='${x + w / 2}' y='${y + h / 2 + 6}' font-size='12' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
       }
     });
 
     svg += `</svg>`;
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
+
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1115,7 +1324,6 @@ function ClassDiagramEditor() {
     URL.revokeObjectURL(url);
   };
 
-  // EXACTLY LIKE UMLEditor - Export JSON
   const handleSaveJSON = () => {
     const data = JSON.stringify({ selectedType: 'CLASS', elements, connections }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -1212,7 +1420,7 @@ function ClassDiagramEditor() {
           </button>
           <h1>{title}</h1>
           <div className="header-actions">
-            <button className="btn-primary" onClick={handleSaveToDatabase}>💾 Save to DB</button>
+            <button className="btn-primary" onClick={handleSaveToDatabase}>Salvare</button>
             <div className="dropdown-save">
               <button className="btn-secondary">Export ▼</button>
               <div className="dropdown-content">
@@ -1320,9 +1528,9 @@ function ClassDiagramEditor() {
                         minHeight: el.height || (() => {
                           const headerHeight = el.type === 'INTERFACE' ? 50 : 36;
                           const itemBaseHeight = 20;
-                          const attrItemsHeight = Math.max(1, el.attributes?.length || 0) * itemBaseHeight;
+                          const attrItemsHeight = el.type === 'CLASS' ? Math.max(1, el.attributes?.length || 0) * itemBaseHeight : 0;
                           const methodItemsHeight = Math.max(1, el.methods?.length || 0) * itemBaseHeight;
-                          const separatorHeight = 2;
+                          const separatorHeight = el.type === 'CLASS' ? 2 : 0;
                           return headerHeight + attrItemsHeight + separatorHeight + methodItemsHeight;
                         })(),
                         width: '100%',
@@ -1353,7 +1561,7 @@ function ClassDiagramEditor() {
                           <div className="uml-class-name">{el.name}</div>
                         )}
                       </div>
-                      {(el.type === 'CLASS' || el.type === 'INTERFACE') && (
+                      {el.type === 'CLASS' && (
                         <div 
                           className="uml-class-section uml-attributes"
                           style={{
@@ -1517,88 +1725,110 @@ function ClassDiagramEditor() {
                 </marker>
               </defs>
               {connections.map((conn) => {
-                const fromEl = elements.find(el => el.id === conn.from);
-                const toEl = elements.find(el => el.id === conn.to);
-                if (!fromEl || !toEl) return null;
-
-                // Recalculate connection points based on current element positions
-                // This makes connections follow elements when they move
-                let fromX, fromY, toX, toY, targetEdge;
-                
-                if (conn.fromPoint && conn.toPoint) {
-                  // Recalculate using stored edge+offset with current element positions
-                  const fromPt = getConnectionPointForElement(fromEl, conn.fromPoint);
-                  const toPt = getConnectionPointForElement(toEl, conn.toPoint);
-                  fromX = fromPt.x;
-                  fromY = fromPt.y;
-                  toX = toPt.x;
-                  toY = toPt.y;
-                  targetEdge = conn.toPoint.point;
-                } else {
-                  // Fallback to center-to-center for old connections
-                  fromX = fromEl.x + (fromEl.width || 200) / 2;
-                  fromY = fromEl.y + (fromEl.height || 140) / 2;
-                  toX = toEl.x + (toEl.width || 200) / 2;
-                  toY = toEl.y + (toEl.height || 140) / 2;
-                }
-                
-                // Build waypoints - use control points if available
-                let waypoints;
-                if (conn.controlPoints && conn.controlPoints.length > 0) {
-                  // Use control points
-                  waypoints = [{ x: fromX, y: fromY }, ...conn.controlPoints, { x: toX, y: toY }];
-                } else {
-                  // Find path around obstacles with orthogonal routing
-                  waypoints = findPathAroundObstacles(
-                    fromX, fromY, toX, toY,
-                    elements,
-                    [conn.from, conn.to],
-                    targetEdge
-                  );
-                }
-
-                // Convert waypoints to SVG path with 90-degree corners
+                const waypoints = getConnectionWaypoints(conn);
+                if (!waypoints.length) return null;
                 const pathD = buildOrthogonalPathThroughWaypoints(waypoints);
-
                 let marker = '';
                 if (conn.type === 'INHERITANCE') marker = 'url(#arrowTriangle)';
                 else if (conn.type === 'COMPOSITION') marker = 'url(#arrowDiamond)';
                 else if (conn.type === 'AGGREGATION') marker = 'url(#arrowDiamondOpen)';
                 else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
-
                 return (
                   <g key={conn.id}>
+                    {/* Invisible thick stroke for easier clicking/dblclick */}
                     <path
                       d={pathD}
                       fill="none"
-                      stroke="#8b4513"
-                      strokeWidth="2"
-                      markerEnd={marker}
-                      className="connection-line"
+                      stroke="transparent"
+                      strokeWidth="15"
+                      pointerEvents="auto"
                       onClick={(e) => { 
                         e.stopPropagation(); 
                         setSelectedElement(null);
                         setSelectedConnection(conn.id);
                       }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        // Add control point at click location
-                        const canvasRect = canvasRef.current?.getBoundingClientRect();
-                        if (!canvasRect) return;
-                        const x = e.clientX - canvasRect.left;
-                        const y = e.clientY - canvasRect.top;
-                        const newCPs = [...(conn.controlPoints || []), { x, y }];
-                        setConnections(connections.map(c =>
-                          c.id === conn.id ? { ...c, controlPoints: newCPs } : c
-                        ));
-                        setSelectedConnection(conn.id);
-                      }}
+                      onDoubleClick={e => handleEdgeDoubleClick(e, conn)}
+                      style={{ cursor: 'pointer' }}
                     />
+                    {/* Visible connection line */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke={selectedConnection === conn.id ? '#9168b7' : '#8b4513'}
+                      strokeWidth={selectedConnection === conn.id ? 3 : 2}
+                      markerEnd={marker}
+                      className="connection-line"
+                      pointerEvents="none"
+                    />
+                    {/* DOAR waypoints puse de utilizator */}
+                    {Array.isArray(conn.controlPoints) && conn.controlPoints.map((wp, idx) => (
+                      <circle
+                        key={idx}
+                        cx={wp.x}
+                        cy={wp.y}
+                        r={7}
+                        fill="#fff"
+                        stroke="#9168b7"
+                        strokeWidth={2}
+                        onMouseDown={e => handleWaypointMouseDown(e, conn.id, idx)}
+                        onClick={e => handleWaypointClick(e, conn.id, idx)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    ))}
                   </g>
                 );
               })}
             </svg>
+
+            {/* Endpoint circles - visible when connection is selected */}
+            {connections.map((conn) => {
+              if (selectedConnection !== conn.id) return null;
+
+              const fromEl = elements.find(el => el.id === conn.from);
+              const toEl = elements.find(el => el.id === conn.to);
+              if (!fromEl || !toEl || !conn.fromPoint || !conn.toPoint) return null;
+
+              const size = 8;
+              const endpoints = [
+                { point: conn.fromPoint, isStart: true, label: 'from' },
+                { point: conn.toPoint, isStart: false, label: 'to' }
+              ];
+
+              return endpoints.map((ep, idx) => {
+                const isDragging = draggingEndpoint?.connectionId === conn.id && draggingEndpoint?.isStart === ep.isStart;
+                return (
+                  <div
+                    key={`endpoint-${conn.id}-${ep.label}`}
+                    style={{
+                      position: 'absolute',
+                      left: `${ep.point.x - size}px`,
+                      top: `${ep.point.y - size}px`,
+                      width: `${size * 2}px`,
+                      height: `${size * 2}px`,
+                      borderRadius: '50%',
+                      backgroundColor: ep.isStart ? '#ef4444' : '#06b6d4',
+                      border: `2px solid ${ep.isStart ? '#991b1b' : '#0e7490'}`,
+                      cursor: 'grab',
+                      zIndex: isDragging ? 1000 : 950,
+                      pointerEvents: 'auto',
+                      transition: isDragging ? 'none' : 'all 0.2s ease',
+                      opacity: isDragging ? 1 : 0.8,
+                      boxShadow: isDragging ? '0 0 8px rgba(0,0,0,0.3)' : 'none'
+                    }}
+                    title={`${ep.label === 'from' ? 'From' : 'To'} endpoint - Drag to move on element edge`}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setDraggingEndpoint({
+                        connectionId: conn.id,
+                        isStart: ep.isStart,
+                        startX: e.clientX,
+                        startY: e.clientY
+                      });
+                    }}
+                  />
+                );
+              });
+            })}
 
             {/* Control points on connections - draggable circles */}
             {connections.map((conn) => {
@@ -1810,12 +2040,34 @@ function ClassDiagramEditor() {
               connections.map(conn => {
                 const fromEl = elements.find(e => e.id === conn.from);
                 const toEl = elements.find(e => e.id === conn.to);
+                const isSelected = selectedConnection === conn.id;
                 return (
-                  <div key={conn.id} className="connection-item">
-                    <span>{fromEl?.name} → {toEl?.name}</span>
-                    <small>{conn.type}</small>
+                  <div 
+                    key={conn.id} 
+                    className="connection-item"
+                    style={{
+                      backgroundColor: isSelected ? '#e9d5ff' : 'transparent',
+                      borderLeft: isSelected ? '4px solid #9168b7' : '4px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedConnection(null);
+                      } else {
+                        setSelectedConnection(conn.id);
+                        setSelectedElement(null);
+                      }
+                    }}
+                  >
+                    <span style={{ fontWeight: isSelected ? 'bold' : 'normal' }}>{fromEl?.name} → {toEl?.name}</span>
+                    <small style={{ color: isSelected ? '#7c3aed' : '#666' }}>{conn.type}</small>
                     <button
-                      onClick={() => setConnections(connections.filter(c => c.id !== conn.id))}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConnections(connections.filter(c => c.id !== conn.id));
+                        if (isSelected) setSelectedConnection(null);
+                      }}
                       title="Delete connection"
                     >
                       ×
