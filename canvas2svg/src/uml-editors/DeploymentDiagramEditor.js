@@ -728,7 +728,7 @@ function DeploymentDiagramEditor() {
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/diagrams/${id}`);
+      const response = await fetch(`/api/diagrams/${id}`);
       const result = await response.json();
       
       console.log('Load response:', result);
@@ -972,7 +972,7 @@ function DeploymentDiagramEditor() {
         ...(diagramIdToUpdate && { diagramId: diagramIdToUpdate })
       };
 
-      const response = await fetch('http://localhost:5000/api/diagrams/save', {
+      const response = await fetch('/api/diagrams/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

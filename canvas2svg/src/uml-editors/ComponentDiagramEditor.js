@@ -7,6 +7,9 @@ const COMPONENT_ELEMENTS = {
   COMPONENT: { label: 'Component', icon: '📦', color: '#E8D4F8' },
   ARTIFACT: { label: 'Artifact', icon: '📄', color: '#F8E8D4' },
   PACKAGE: { label: 'Package', icon: '📁', color: '#E8F8D4' },
+  DATABASE: { label: 'Database', icon: '🛢️', color: '#FFE8E8' },
+  RECTANGLE: { label: 'Rectangle', icon: '▭', color: '#FFF4E6' },
+  TEXT_LABEL: { label: 'Text Label', icon: 'T', color: 'transparent' },
   LOLLIPOP_DECORATOR: { label: 'Provided Interface (●)', icon: '●', color: '#FFD700' },
   SOCKET_DECORATOR: { label: 'Required Interface ( ( )', icon: '(', color: '#FFD700' },
   ASSEMBLY_PORT: { label: 'Assembly Port (■)', icon: '■', color: '#C0C0C0' }
@@ -90,6 +93,247 @@ function getConnectionPointOnElement(element, edgeType) {
   return { x, y };
 }
 
+// ============ ROUTING HELPER FUNCTIONS ============
+
+/**
+ * Get bounding box of an element
+ */
+function getElementBounds(el) {
+  return {
+    x: el.x,
+    y: el.y,
+    width: el.width || 200,
+    height: el.height || 140
+  };
+}
+
+/**
+ * Check if a line segment intersects with a rectangle
+ */
+function lineIntersectsRect(x1, y1, x2, y2, rect) {
+  const left = rect.x - 10;
+  const right = rect.x + rect.width + 10;
+  const top = rect.y - 10;
+  const bottom = rect.y + rect.height + 10;
+
+  const p1Inside = x1 >= left && x1 <= right && y1 >= top && y1 <= bottom;
+  const p2Inside = x2 >= left && x2 <= right && y2 >= top && y2 <= bottom;
+  
+  if (p1Inside || p2Inside) return true;
+
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, right, top)) return true;
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, bottom, right, bottom)) return true;
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, left, bottom)) return true;
+  if (lineSegmentsIntersect(x1, y1, x2, y2, right, top, right, bottom)) return true;
+
+  return false;
+}
+
+/**
+ * Check if two line segments intersect
+ */
+function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const ccw = (ax, ay, bx, by, cx, cy) => {
+    return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax);
+  };
+
+  return ccw(x1, y1, x3, y3, x4, y4) !== ccw(x2, y2, x3, y3, x4, y4) &&
+         ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
+}
+
+/**
+ * Build orthogonal path with 90-degree corners
+ */
+function buildOrthogonalPathThroughWaypoints(waypoints) {
+  if (waypoints.length === 0) return '';
+  if (waypoints.length === 1) {
+    return `M ${Math.round(waypoints[0].x)},${Math.round(waypoints[0].y)}`;
+  }
+  
+  const path = [waypoints[0]];
+  
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const from = waypoints[i];
+    const to = waypoints[i + 1];
+    
+    // L-shaped routing: go horizontal first, then vertical
+    const midX = to.x;
+    const midY = from.y;
+    
+    if (midX !== from.x) {
+      path.push({ x: midX, y: from.y });
+    }
+    if (midY !== to.y) {
+      path.push({ x: to.x, y: midY });
+    }
+    path.push(to);
+  }
+  
+  // Remove duplicates
+  const cleanPath = [];
+  for (const pt of path) {
+    if (cleanPath.length === 0 || 
+        cleanPath[cleanPath.length - 1].x !== pt.x || 
+        cleanPath[cleanPath.length - 1].y !== pt.y) {
+      cleanPath.push(pt);
+    }
+  }
+  
+  let d = `M ${Math.round(cleanPath[0].x)},${Math.round(cleanPath[0].y)}`;
+  for (let i = 1; i < cleanPath.length; i++) {
+    d += ` L ${Math.round(cleanPath[i].x)},${Math.round(cleanPath[i].y)}`;
+  }
+  return d;
+}
+
+/**
+ * Lee/BFS grid-based orthogonal routing for UML edges
+ */
+function findPathAroundObstacles(x1, y1, x2, y2, elements, excludeIds = [], targetEdge = null) {
+  // Grid params
+  const GRID_SIZE = 10;
+  const CANVAS_W = 2000;
+  const CANVAS_H = 1200;
+  const obstacles = elements
+    .filter(el => !excludeIds.includes(el.id))
+    .map(el => getElementBounds(el));
+
+  // Build grid: 0 = free, 1 = obstacle
+  const cols = Math.ceil(CANVAS_W / GRID_SIZE);
+  const rows = Math.ceil(CANVAS_H / GRID_SIZE);
+  const grid = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (const obs of obstacles) {
+    const left = Math.floor((obs.x - 10) / GRID_SIZE);
+    const right = Math.ceil((obs.x + obs.width + 10) / GRID_SIZE);
+    const top = Math.floor((obs.y - 10) / GRID_SIZE);
+    const bottom = Math.ceil((obs.y + obs.height + 10) / GRID_SIZE);
+    for (let i = top; i <= bottom; i++) {
+      for (let j = left; j <= right; j++) {
+        if (i >= 0 && i < rows && j >= 0 && j < cols) {
+          grid[i][j] = 1;
+        }
+      }
+    }
+  }
+
+  // Convert (x, y) to grid cell
+  function toCell(x, y) {
+    return [Math.round(y / GRID_SIZE), Math.round(x / GRID_SIZE)];
+  }
+  function toCoord(row, col) {
+    return { x: col * GRID_SIZE, y: row * GRID_SIZE };
+  }
+
+  const [startRow, startCol] = toCell(x1, y1);
+  const [endRow, endCol] = toCell(x2, y2);
+
+  // BFS
+  const queue = [[startRow, startCol]];
+  const prev = Array.from({ length: rows }, () => Array(cols).fill(null));
+  grid[startRow][startCol] = 0; // ensure start is free
+  let found = false;
+  const DIRS = [
+    [0, 1], [1, 0], [0, -1], [-1, 0]
+  ]; // right, down, left, up
+  while (queue.length > 0) {
+    const [r, c] = queue.shift();
+    if (r === endRow && c === endCol) {
+      found = true;
+      break;
+    }
+    for (const [dr, dc] of DIRS) {
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && grid[nr][nc] === 0 && !prev[nr][nc]) {
+        prev[nr][nc] = [r, c];
+        queue.push([nr, nc]);
+      }
+    }
+  }
+
+  // Reconstruct path
+  let waypoints = [{ x: x1, y: y1 }];
+  if (found) {
+    let pathCells = [];
+    let cur = [endRow, endCol];
+    while (cur && (cur[0] !== startRow || cur[1] !== startCol)) {
+      pathCells.push(cur);
+      cur = prev[cur[0]][cur[1]];
+    }
+    pathCells.reverse();
+    for (const [r, c] of pathCells) {
+      waypoints.push(toCoord(r, c));
+    }
+  } else {
+    // fallback: direct
+    waypoints.push({ x: x2, y: y2 });
+  }
+
+  // Add perpendicular approach to target edge if needed
+  if (targetEdge === 'top' || targetEdge === 'bottom') {
+    const last = waypoints[waypoints.length - 1];
+    if (Math.abs(last.x - x2) > 1) {
+      waypoints.push({ x: x2, y: last.y });
+    }
+  } else if (targetEdge === 'left' || targetEdge === 'right') {
+    const last = waypoints[waypoints.length - 1];
+    if (Math.abs(last.y - y2) > 1) {
+      waypoints.push({ x: last.x, y: y2 });
+    }
+  }
+  if (waypoints[waypoints.length - 1].x !== x2 || waypoints[waypoints.length - 1].y !== y2) {
+    waypoints.push({ x: x2, y: y2 });
+  }
+  return waypoints;
+}
+
+// ============ END ROUTING HELPERS ============
+
+// Helper: calculează distanța de la un punct la un segment
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), projX: x1, projY: y1, t: 0 };
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return { dist: Math.hypot(px - projX, py - projY), projX, projY, t };
+}
+
+/**
+ * Calculate actual connection point based on stored edge and offset
+ * Uses offset to move with the element when it's dragged
+ */
+function getConnectionPointForElement(element, connectionPoint) {
+  // If connectionPoint has edge name and offset, recalculate based on current element position
+  if (connectionPoint && typeof connectionPoint === 'object' && connectionPoint.point && connectionPoint.offset !== undefined) {
+    const w = element.width || 200;
+    const h = element.height || 140;
+    const offset = connectionPoint.offset;
+    
+    switch (connectionPoint.point) {
+      case 'top':
+        const topX = Math.max(element.x, Math.min(element.x + offset, element.x + w));
+        return { x: topX, y: element.y };
+      case 'bottom':
+        const bottomX = Math.max(element.x, Math.min(element.x + offset, element.x + w));
+        return { x: bottomX, y: element.y + h };
+      case 'left':
+        const leftY = Math.max(element.y, Math.min(element.y + offset, element.y + h));
+        return { x: element.x, y: leftY };
+      case 'right':
+        const rightY = Math.max(element.y, Math.min(element.y + offset, element.y + h));
+        return { x: element.x + w, y: rightY };
+      default:
+        return { x: element.x + w / 2, y: element.y + h / 2 };
+    }
+  }
+  
+  // Fallback to center (for backward compatibility with old connections)
+  const w = element.width || 200;
+  const h = element.height || 140;
+  return { x: element.x + w / 2, y: element.y + h / 2 };
+}
+
 function getPointAtOffsetOnEdge(element, edgeType, offset) {
   offset = Math.max(0, Math.min(1, offset || 0.5)); // Clamp 0-1
   let x, y;
@@ -141,51 +385,6 @@ function getClosestPointOnContour(element, pointX, pointY) {
   }
   
   return { edge: closest.edge, offset };
-}
-
-// ============ ORTHOGONAL ROUTING ============
-function buildOrthogonalPathThroughWaypoints(waypoints) {
-  if (waypoints.length === 0) return '';
-  if (waypoints.length === 1) {
-    return `M ${Math.round(waypoints[0].x)},${Math.round(waypoints[0].y)}`;
-  }
-  
-  const path = [waypoints[0]];
-  
-  for (let i = 0; i < waypoints.length - 1; i++) {
-    const from = waypoints[i];
-    const to = waypoints[i + 1];
-    
-    // L-shaped routing: go horizontal first, then vertical
-    const midX = to.x;
-    const midY = from.y;
-    
-    if (midX !== from.x) {
-      path.push({ x: midX, y: from.y });
-    }
-    if (midY !== to.y) {
-      path.push({ x: to.x, y: midY });
-    }
-    path.push(to);
-  }
-  
-  // Remove duplicates
-  const cleanPath = [];
-  for (const pt of path) {
-    if (cleanPath.length === 0 || 
-        cleanPath[cleanPath.length - 1].x !== pt.x || 
-        cleanPath[cleanPath.length - 1].y !== pt.y) {
-      cleanPath.push(pt);
-    }
-  }
-  
-  // Build SVG path
-  let pathStr = `M ${Math.round(cleanPath[0].x)},${Math.round(cleanPath[0].y)}`;
-  for (let i = 1; i < cleanPath.length; i++) {
-    pathStr += ` L ${Math.round(cleanPath[i].x)},${Math.round(cleanPath[i].y)}`;
-  }
-  
-  return pathStr;
 }
 
 function renderComponentElement(ctx, element) {
@@ -313,6 +512,54 @@ function escapeXML(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/**
+ * Splits text into lines that fit within maxWidth pixels.
+ * Handles explicit \n newlines AND automatic word-wrapping.
+ * Returns an array of line strings.
+ */
+function wrapSVGText(text, maxWidth, fontSize) {
+  // Approximate character width: ~0.58 * fontSize for Arial bold
+  const charW = fontSize * 0.58;
+  const maxChars = Math.max(5, Math.floor(maxWidth / charW));
+
+  const paragraphs = (text || '').split('\n');
+  const lines = [];
+
+  paragraphs.forEach(paragraph => {
+    if (paragraph.trim() === '') {
+      lines.push('');
+      return;
+    }
+    const words = paragraph.split(' ');
+    let current = '';
+    words.forEach(word => {
+      const test = current ? current + ' ' + word : word;
+      if (test.length <= maxChars) {
+        current = test;
+      } else {
+        if (current) lines.push(current);
+        // If a single word is longer than maxChars, push it anyway
+        current = word;
+      }
+    });
+    if (current) lines.push(current);
+  });
+
+  return lines;
+}
+
+/**
+ * Returns SVG <text> elements for wrapped text, vertically centred in a box.
+ */
+function svgTextBlock(text, cx, cy, maxWidth, fontSize, fontWeight, fill, lineH) {
+  const lines = wrapSVGText(text, maxWidth, fontSize);
+  const totalH = lines.length * lineH;
+  const startY = cy - totalH / 2 + lineH / 2;
+  return lines.map((line, i) =>
+    `<text x='${cx}' y='${startY + i * lineH}' font-family='Arial' font-size='${fontSize}' font-weight='${fontWeight}' text-anchor='middle' dominant-baseline='middle' fill='${fill}'>${escapeXML(line)}</text>`
+  ).join('\n');
+}
+
 function generateFullSVG(elements, connections, title) {
   let svg = '';
   
@@ -370,24 +617,46 @@ function generateFullSVG(elements, connections, title) {
   
   for (const el of elements) {
     if (el.type === 'COMPONENT') {
+      const clipId = `clip-comp-${el.id}`;
+      svg += `<clipPath id='${clipId}'><rect x='${el.x + 4}' y='${el.y + 4}' width='${el.width - 8}' height='${el.height - 8}'/></clipPath>\n`;
       svg += `<rect x='${el.x}' y='${el.y}' width='${el.width}' height='${el.height}' fill='#E8D4F8' stroke='#333' stroke-width='2' />\n`;
-      // Component icon in top-right
       const iconX = el.x + el.width - 25;
       const iconY = el.y + 5;
       svg += `<rect x='${iconX}' y='${iconY}' width='20' height='20' fill='#ccc' stroke='#333' stroke-width='1.5' />\n`;
       svg += `<rect x='${iconX - 8}' y='${iconY + 4}' width='5' height='5' fill='#333' stroke='#333' stroke-width='0.5' />\n`;
       svg += `<rect x='${iconX - 8}' y='${iconY + 12}' width='5' height='5' fill='#333' stroke='#333' stroke-width='0.5' />\n`;
-      svg += `<text x='${el.x + el.width / 2}' y='${el.y + el.height / 2}' font-family='Arial' font-size='10' font-style='italic' text-anchor='middle' fill='#666'>&lt;&lt;component&gt;&gt;</text>\n`;
-      svg += `<text x='${el.x + el.width / 2}' y='${el.y + el.height / 2 + 15}' font-family='Arial' font-size='12' font-weight='bold' text-anchor='middle' fill='#333'>${escapeXML(el.name)}</text>\n`;
+      svg += `<text x='${el.x + el.width / 2}' y='${el.y + el.height / 2 - 10}' font-family='Arial' font-size='10' font-style='italic' text-anchor='middle' fill='#666'>&lt;&lt;component&gt;&gt;</text>\n`;
+      const cx = el.x + el.width / 2;
+      const cy = el.y + el.height / 2 + 8;
+      svg += `<g clip-path='url(#${clipId})'>\n`;
+      svg += svgTextBlock(el.name, cx, cy, el.width - 16, 12, 'bold', '#333', 16);
+      svg += `\n</g>\n`;
     } else if (el.type === 'ARTIFACT') {
+      const clipId = `clip-art-${el.id}`;
+      svg += `<clipPath id='${clipId}'><rect x='${el.x + 4}' y='${el.y + 4}' width='${el.width - 8}' height='${el.height - 8}'/></clipPath>\n`;
       svg += `<rect x='${el.x}' y='${el.y}' width='${el.width}' height='${el.height}' fill='#F8E8D4' stroke='#333' stroke-width='2' />\n`;
-      svg += `<text x='${el.x + el.width / 2}' y='${el.y + el.height / 2}' font-family='Arial' font-size='10' font-style='italic' text-anchor='middle' fill='#666'>&lt;&lt;artifact&gt;&gt;</text>\n`;
-      svg += `<text x='${el.x + el.width / 2}' y='${el.y + el.height / 2 + 15}' font-family='Arial' font-size='12' font-weight='bold' text-anchor='middle' fill='#333'>${escapeXML(el.name)}</text>\n`;
+      svg += `<text x='${el.x + el.width / 2}' y='${el.y + el.height / 2 - 10}' font-family='Arial' font-size='10' font-style='italic' text-anchor='middle' fill='#666'>&lt;&lt;artifact&gt;&gt;</text>\n`;
+      const cx = el.x + el.width / 2;
+      const cy = el.y + el.height / 2 + 8;
+      svg += `<g clip-path='url(#${clipId})'>\n`;
+      svg += svgTextBlock(el.name, cx, cy, el.width - 16, 12, 'bold', '#333', 16);
+      svg += `\n</g>\n`;
     } else if (el.type === 'PACKAGE') {
       svg += `<rect x='${el.x}' y='${el.y}' width='40' height='20' fill='#E8F8D4' stroke='#333' stroke-width='2' />\n`;
       svg += `<rect x='${el.x}' y='${el.y + 17}' width='${el.width}' height='${el.height - 17}' fill='#E8F8D4' stroke='#333' stroke-width='2' />\n`;
-      svg += `<text x='${el.x + 20}' y='${el.y + 14}' font-family='Arial' font-size='10' font-weight='bold' text-anchor='middle' fill='#333'>📁</text>\n`;
-      svg += `<text x='${el.x + el.width / 2}' y='${el.y + 40}' font-family='Arial' font-size='12' font-weight='bold' text-anchor='middle' fill='#333'>${escapeXML(el.name)}</text>\n`;
+      svg += `<text x='${el.x + 20}' y='${el.y + 14}' font-family='Arial' font-size='10' font-weight='bold' text-anchor='middle' fill='#333'>&#128193;</text>\n`;
+      svg += svgTextBlock(el.name, el.x + el.width / 2, el.y + el.height / 2 + 12, el.width - 16, 12, 'bold', '#333', 16) + '\n';
+    } else if (el.type === 'DATABASE') {
+      const rx = el.width / 2 - 2;
+      const ry = Math.min(25, el.height * 0.15);
+      const topY = ry + 2;
+      const bottomCenterY = el.height - ry - 2;
+      svg += `<g transform='translate(${el.x}, ${el.y})'>\n`;
+      svg += `<path d='M 2,${topY} L 2,${bottomCenterY} A ${rx},${ry} 0 0 0 ${el.width - 2},${bottomCenterY} L ${el.width - 2},${topY} Z' fill='#FFE8E8' stroke='#333' stroke-width='2' />\n`;
+      svg += `<ellipse cx='${el.width / 2}' cy='${topY}' rx='${rx}' ry='${ry}' fill='#FFD2D2' stroke='#333' stroke-width='2' />\n`;
+      const textCY = topY + (bottomCenterY - topY) / 2;
+      svg += svgTextBlock(el.name, el.width / 2, textCY, el.width - 16, 12, 'bold', '#333', 16) + '\n';
+      svg += `</g>\n`;
     } else if (el.type === 'LOLLIPOP_DECORATOR') {
       const cx = el.x + el.width / 2;
       const cy = el.y + el.height / 2;
@@ -402,6 +671,22 @@ function generateFullSVG(elements, connections, title) {
       svg += `</g>\n`;
     } else if (el.type === 'ASSEMBLY_PORT') {
       svg += `<rect x='${el.x + 2}' y='${el.y + 2}' width='${el.width - 4}' height='${el.height - 4}' fill='#333' stroke='#333' stroke-width='1' />\n`;
+    } else if (el.type === 'RECTANGLE') {
+      const clipId = `clip-rect-${el.id}`;
+      svg += `<clipPath id='${clipId}'><rect x='${el.x + 4}' y='${el.y + 4}' width='${el.width - 8}' height='${el.height - 8}'/></clipPath>\n`;
+      svg += `<rect x='${el.x}' y='${el.y}' width='${el.width}' height='${el.height}' fill='#FFF4E6' stroke='#333' stroke-width='2' rx='2' />\n`;
+      const cx = el.x + el.width / 2;
+      const cy = el.y + el.height / 2;
+      svg += `<g clip-path='url(#${clipId})'>\n`;
+      svg += svgTextBlock(el.name, cx, cy, el.width - 20, 13, 'bold', '#4a2c0a', 18);
+      svg += `\n</g>\n`;
+    } else if (el.type === 'TEXT_LABEL') {
+      // Multi-line text label, left-aligned, no box
+      const lines = wrapSVGText(el.name || '', el.width || 200, el.fontSize || 14);
+      const lh = (el.fontSize || 14) * 1.4;
+      lines.forEach((line, i) => {
+        svg += `<text x='${el.x}' y='${el.y + (el.fontSize || 14) + i * lh}' font-family='Arial' font-size='${el.fontSize || 14}' fill='#333' font-weight='${el.fontWeight || 'normal'}'>${escapeXML(line)}</text>\n`;
+      });
     }
   }
   
@@ -431,11 +716,12 @@ export default function ComponentDiagramEditor() {
   const [draggingElement, setDraggingElement] = useState(null);
   const [resizing, setResizing] = useState(null);
   const [dragOffset, setDragOffset] = useState({x: 0, y: 0});
+  const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
 
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/class-diagrams/${id}`);
+      const response = await fetch(`/api/class-diagrams/${id}`);
       const result = await response.json();
       console.log('Loaded diagram:', result);
       
@@ -473,6 +759,34 @@ export default function ComponentDiagramEditor() {
     // Canvas removed - using HTML rendering instead
   }, [elements, connections, selectedElement, selectedConnection]);
 
+  // Handle dragging waypoints
+  useEffect(() => {
+    if (!draggingWaypoint) return;
+    const handleMove = (e) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const newX = e.clientX - rect.left;
+      const newY = e.clientY - rect.top;
+      
+      setConnections(connections => connections.map(c => {
+        if (c.id !== draggingWaypoint.connectionId) return c;
+        const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+        newWps[draggingWaypoint.idx] = { x: newX, y: newY };
+        return { ...c, controlPoints: newWps, waypoints: undefined };
+      }));
+    };
+    const handleUp = () => {
+      setDraggingWaypoint(null);
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [draggingWaypoint, connections]);
+
   useEffect(() => {
     if (!draggingElement && !resizing) return;
 
@@ -497,7 +811,7 @@ export default function ComponentDiagramEditor() {
         // Set minimum dimensions based on element type
         let minWidth = 20;
         let minHeight = 20;
-        if (element && ['COMPONENT', 'ARTIFACT', 'PACKAGE'].includes(element.type)) {
+        if (element && ['COMPONENT', 'ARTIFACT', 'PACKAGE', 'DATABASE'].includes(element.type)) {
           minWidth = 120;
           minHeight = 80;
         }
@@ -583,6 +897,94 @@ export default function ComponentDiagramEditor() {
   const handleConnectionClick = (connId) => {
     setSelectedConnection(connId);
     setSelectedElement(null);
+  };
+
+  // Returnează waypoints cu rutare automată de evitare a obstacolelor
+  function getConnectionWaypoints(connection) {
+    const fromEl = elements.find(el => el.id === connection.from);
+    const toEl = elements.find(el => el.id === connection.to);
+    if (!fromEl || !toEl) return [];
+    
+    const fromPt = getPointAtOffsetOnEdge(fromEl, connection.fromEdge || 'right', connection.fromOffset);
+    const toPt = getPointAtOffsetOnEdge(toEl, connection.toEdge || 'left', connection.toOffset);
+    const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : (connection.waypoints || []);
+    
+    // Dacă nu există puncte intermediare utilizator, folosește rutarea completă
+    if (userWps.length === 0) {
+      return findPathAroundObstacles(
+        fromPt.x, fromPt.y, toPt.x, toPt.y,
+        elements, [connection.from, connection.to], connection.toEdge || 'left'
+      );
+    }
+    
+    // Altfel, rutează fiecare segment între puncte fixe
+    const allPoints = [fromPt, ...userWps, toPt];
+    let result = [allPoints[0]];
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      const seg = findPathAroundObstacles(
+        allPoints[i].x, allPoints[i].y, allPoints[i+1].x, allPoints[i+1].y,
+        elements, [connection.from, connection.to],
+        (i === allPoints.length - 2) ? (connection.toEdge || 'left') : null
+      );
+      result = result.concat(seg.slice(1));
+    }
+    return result;
+  }
+
+  // Adaugă punct intermediar pe muchie la dublu-click
+  const handleEdgeDoubleClick = (e, connection) => {
+    if (!connection) return;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const fromEl = elements.find(el => el.id === connection.from);
+    const toEl = elements.find(el => el.id === connection.to);
+    if (!fromEl || !toEl) return;
+    
+    const fromPt = getPointAtOffsetOnEdge(fromEl, connection.fromEdge || 'right', connection.fromOffset);
+    const toPt = getPointAtOffsetOnEdge(toEl, connection.toEdge || 'left', connection.toOffset);
+    const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : (connection.waypoints || []);
+    
+    // Construiește segmente din waypoints: start -> pct1 -> pct2 -> ... -> end
+    const segmentPoints = [fromPt, ...userWps, toPt];
+    let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+    
+    for (let i = 0; i < segmentPoints.length - 1; i++) {
+      const { dist, projX, projY } = distanceToSegment(x, y, segmentPoints[i].x, segmentPoints[i].y, segmentPoints[i+1].x, segmentPoints[i+1].y);
+      if (dist < minDist) {
+        minDist = dist;
+        insertIdx = i;
+        bestProj = { x: projX, y: projY };
+      }
+    }
+    
+    // Adaugă punctul la poziția corectă în user waypoints
+    const newConnections = connections.map(c => {
+      if (c.id !== connection.id) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+      newWps.splice(insertIdx, 0, bestProj);
+      return { ...c, controlPoints: newWps, waypoints: undefined };
+    });
+    setConnections(newConnections);
+  };
+
+  // Drag waypoint
+  const handleWaypointMouseDown = (e, connectionId, idx) => {
+    e.stopPropagation();
+    setDraggingWaypoint({ connectionId, idx });
+  };
+
+  // Șterge waypoint la Alt+click
+  const handleWaypointClick = (e, connectionId, idx) => {
+    if (!e.altKey) return;
+    setConnections(connections => connections.map(c => {
+      if (c.id !== connectionId) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+      newWps.splice(idx, 1);
+      return { ...c, controlPoints: newWps, waypoints: undefined };
+    }));
   };
 
   const handleConnectionLabelChange = (connId, newLabel) => {
@@ -672,6 +1074,16 @@ export default function ComponentDiagramEditor() {
       height = 32;
       offsetX = 16;
       offsetY = 16;
+    } else if (draggedType === 'RECTANGLE') {
+      width = 200;
+      height = 100;
+      offsetX = 100;
+      offsetY = 50;
+    } else if (draggedType === 'TEXT_LABEL') {
+      width = 160;
+      height = 30;
+      offsetX = 80;
+      offsetY = 15;
     }
 
     const newElement = {
@@ -764,7 +1176,7 @@ export default function ComponentDiagramEditor() {
       if (activeDiagramId) {
         // UPDATE existing diagram
         method = 'PUT';
-        url = `http://localhost:5000/api/class-diagrams/${activeDiagramId}`;
+        url = `/api/class-diagrams/${activeDiagramId}`;
         response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
@@ -779,7 +1191,7 @@ export default function ComponentDiagramEditor() {
       } else {
         // CREATE new diagram
         method = 'POST';
-        url = 'http://localhost:5000/api/class-diagrams';
+        url = '/api/class-diagrams';
         const newDiagramData = {
           title: diagramTitle,
           userId: parseInt(userId),
@@ -1046,6 +1458,7 @@ export default function ComponentDiagramEditor() {
                     strokeWidth={8}
                     fill="none"
                     pointerEvents="auto"
+                    onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
                   />
                   {/* Visible path */}
                   <path
@@ -1081,6 +1494,24 @@ export default function ComponentDiagramEditor() {
                       {conn.label}
                     </text>
                   )}
+                  {/* Waypoint circles */}
+                  {Array.isArray(conn.controlPoints) && conn.controlPoints.map((wp, idx) => (
+                    <circle
+                      key={`wp-${idx}`}
+                      cx={wp.x}
+                      cy={wp.y}
+                      r={7}
+                      fill="#fff"
+                      stroke="#9168b7"
+                      strokeWidth={2}
+                      onMouseDown={e => handleWaypointMouseDown(e, conn.id, idx)}
+                      onClick={e => handleWaypointClick(e, conn.id, idx)}
+                      onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
+                      style={{ cursor: 'pointer' }}
+                      title="Drag to move, Alt+click to delete"
+                    />
+                  ))}
+                  
                   {/* Draggable endpoints - only when selected */}
                   {isSelected && (
                     <>
@@ -1162,6 +1593,85 @@ export default function ComponentDiagramEditor() {
                   <rect x="2" y="2" width={el.width - 4} height={el.height - 4} fill="#333" stroke="#333" strokeWidth="1"/>
                 </svg>
               );
+            } else if (el.type === 'DATABASE') {
+              const rx = el.width / 2 - 2;
+              const ry = Math.min(25, el.height * 0.15);
+              const topY = ry + 2;
+              const bottomCenterY = el.height - ry - 2;
+              
+              renderElement = (
+                <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                    <path
+                      d={`M 2,${topY} L 2,${bottomCenterY} A ${rx},${ry} 0 0 0 ${el.width - 2},${bottomCenterY} L ${el.width - 2},${topY} Z`}
+                      fill="#FFE8E8"
+                      stroke="#333"
+                      strokeWidth="2"
+                    />
+                    <ellipse
+                      cx={el.width / 2}
+                      cy={topY}
+                      rx={rx}
+                      ry={ry}
+                      fill="#FFD2D2"
+                      stroke="#333"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                  {!isEditing && (
+                    <span style={{ 
+                      position: 'relative', 
+                      zIndex: 2, 
+                      fontWeight: 'bold', 
+                      color: '#333',
+                      fontSize: '13px',
+                      paddingTop: `${ry}px`
+                    }}>
+                      {el.name}
+                    </span>
+                  )}
+                </div>
+              );
+            } else if (el.type === 'RECTANGLE') {
+              renderElement = (
+                <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                    <rect x="0" y="0" width="100%" height="100%" fill="#FFF4E6" stroke="#333" strokeWidth="2" rx="2" />
+                  </svg>
+                  {!isEditing && (
+                    <span style={{
+                      position: 'relative',
+                      zIndex: 2,
+                      fontWeight: 'bold',
+                      color: '#4a2c0a',
+                      fontSize: '13px',
+                      textAlign: 'center',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      padding: '8px 12px',
+                      lineHeight: 1.5
+                    }}>
+                      {el.name}
+                    </span>
+                  )}
+                </div>
+              );
+            } else if (el.type === 'TEXT_LABEL') {
+              renderElement = !isEditing && (
+                <span style={{
+                  fontSize: `${el.fontSize || 14}px`,
+                  fontWeight: el.fontWeight || 'normal',
+                  color: '#333',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  width: '100%',
+                  textAlign: 'left',
+                  lineHeight: 1.4,
+                  padding: '2px 4px'
+                }}>
+                  {el.name}
+                </span>
+              );
             } else {
               // Default rendering
               renderElement = !isEditing && <span>{el.name}</span>;
@@ -1180,19 +1690,21 @@ export default function ComponentDiagramEditor() {
                   width: `${el.width}px`,
                   height: `${el.height}px`,
                   backgroundColor: 'transparent',
-                  border: ['LOLLIPOP_DECORATOR', 'SOCKET_DECORATOR', 'ASSEMBLY_PORT'].includes(el.type) ? 'none' : `${isSelected ? 3 : 2}px solid #333`,
+                  border: ['LOLLIPOP_DECORATOR', 'SOCKET_DECORATOR', 'ASSEMBLY_PORT', 'DATABASE', 'RECTANGLE', 'TEXT_LABEL'].includes(el.type) 
+                    ? (isSelected ? '1px dashed #ec4899' : 'none') 
+                    : `${isSelected ? 3 : 2}px solid #333`,
                   borderRadius: el.type === 'PACKAGE' ? '8px' : '4px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  alignItems: el.type === 'TEXT_LABEL' ? 'flex-start' : 'center',
+                  justifyContent: el.type === 'TEXT_LABEL' ? 'flex-start' : 'center',
                   cursor: isDragging ? 'grabbing' : 'grab',
                   userSelect: 'none',
                   fontSize: '12px',
                   fontWeight: '600',
                   color: '#333',
-                  textAlign: 'center',
-                  overflow: ['LOLLIPOP_DECORATOR', 'SOCKET_DECORATOR', 'ASSEMBLY_PORT'].includes(el.type) ? 'visible' : 'visible',
-                  padding: ['LOLLIPOP_DECORATOR', 'SOCKET_DECORATOR', 'ASSEMBLY_PORT'].includes(el.type) ? '0px' : (el.type === 'PACKAGE' ? '0px' : '8px'),
+                  textAlign: 'left',
+                  overflow: 'visible',
+                  padding: ['LOLLIPOP_DECORATOR', 'SOCKET_DECORATOR', 'ASSEMBLY_PORT', 'DATABASE'].includes(el.type) ? '0px' : (el.type === 'PACKAGE' ? '0px' : '4px'),
                   boxSizing: 'border-box',
                   zIndex: isSelected ? 1000 : 100
                 }}

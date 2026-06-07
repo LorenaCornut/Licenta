@@ -472,7 +472,7 @@ function ObjectDiagramEditor() {
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/object-diagrams/${id}`);
+      const response = await fetch(`/api/object-diagrams/${id}`);
       const result = await response.json();
       if (result.diagram?.data) {
         setTitle(result.diagram.title || 'Untitled Diagram');
@@ -957,7 +957,7 @@ function ObjectDiagramEditor() {
       let response;
 
       if (diagramIdToUpdate) {
-        response = await fetch(`http://localhost:5000/api/object-diagrams/${diagramIdToUpdate}`, {
+        response = await fetch(`/api/object-diagrams/${diagramIdToUpdate}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(diagramData)
@@ -969,7 +969,7 @@ function ObjectDiagramEditor() {
           ...diagramData
         };
 
-        response = await fetch('http://localhost:5000/api/object-diagrams', {
+        response = await fetch('/api/object-diagrams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newDiagramData)

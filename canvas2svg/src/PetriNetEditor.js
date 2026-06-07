@@ -260,8 +260,8 @@ function PetriNetEditor() {
 
     setIsSaving(true);
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/petri-nets/save`, {
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      const response = await fetch(`${apiUrl}/petri-nets/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -321,10 +321,10 @@ function PetriNetEditor() {
 
   const loadPetriDiagram = async () => {
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      console.log(`Fetching from: ${apiUrl}/api/petri-nets/${diagramId}`);
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      console.log(`Fetching from: ${apiUrl}/petri-nets/${diagramId}`);
       
-      const response = await fetch(`${apiUrl}/api/petri-nets/${diagramId}`);
+      const response = await fetch(`${apiUrl}/petri-nets/${diagramId}`);
 
       if (!response.ok) {
         console.error(`Failed to load diagram: ${response.status}`);

@@ -121,11 +121,12 @@ function buildSmoothedPath(x1, y1, x2, y2, allNodes, excludeIds = [], targetRadi
   const obstacleNodes = allNodes
     .filter(n => !excludeIds.includes(n.id))
     .map(n => {
-      const nodeRadius = 45;
-      const d = distancePointToSegment(n.x + nodeRadius, n.y + nodeRadius, x1, y1, x2, y2);
-      const side = sideOfLine(n.x + nodeRadius, n.y + nodeRadius, x1, y1, x2, y2);
-      const dx_to_node = n.x - x1;
-      const dy_to_node = n.y - y1;
+      const nodeRadius = (n.width || 100) * 0.45;
+      const centerOffset = (n.width || 100) / 2;
+      const d = distancePointToSegment(n.x + centerOffset, n.y + centerOffset, x1, y1, x2, y2);
+      const side = sideOfLine(n.x + centerOffset, n.y + centerOffset, x1, y1, x2, y2);
+      const dx_to_node = (n.x + centerOffset) - x1;
+      const dy_to_node = (n.y + centerOffset) - y1;
       const t = (dx_to_node * dx + dy_to_node * dy) / (dist * dist);
       const tClamped = Math.max(0, Math.min(1, t));
       
@@ -199,6 +200,9 @@ const StateEditor = () => {
   const [editName, setEditName] = useState('');
   const [movingElement, setMovingElement] = useState(null);
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
+  const [resizingElement, setResizingElement] = useState(null);
+  const [resizeStartSize, setResizeStartSize] = useState({ width: 0, height: 0 });
+  const [resizeStartMouse, setResizeStartMouse] = useState({ x: 0, y: 0 });
   const [connectionMode, setConnectionMode] = useState(false);
   const [connectionStart, setConnectionStart] = useState(null);
   const [hoveringConnectionElement, setHoveringConnectionElement] = useState(null);
@@ -246,8 +250,8 @@ const StateEditor = () => {
   // Load diagram from backend
   const loadDiagram = async (id) => {
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/diagrams/${id}`);
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      const response = await fetch(`${apiUrl}/diagrams/${id}`);
       
       if (!response.ok) {
         throw new Error(`Failed to load diagram: ${response.status}`);
@@ -321,7 +325,7 @@ const StateEditor = () => {
     setSaveError("");
 
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
 
       // Transform to exact same structure as JSON export
       const diagramData = {
@@ -329,7 +333,7 @@ const StateEditor = () => {
         connections: connections
       };
 
-      const response = await fetch(`${apiUrl}/api/diagrams/save`, {
+      const response = await fetch(`${apiUrl}/diagrams/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -492,7 +496,7 @@ const StateEditor = () => {
           fromX, fromY, toX, toY,
           elements,
           [conn.fromId, conn.toId],
-          40
+          (toEl.width || 100) * 0.4
         );
         
         const pathD = result.path;
@@ -781,6 +785,59 @@ const StateEditor = () => {
     };
   }, [movingElement, moveOffset, elements, connections]);
 
+  // Handle element resize drag
+  const handleResizeMouseDown = (e, el) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingElement(el.id);
+    setResizeStartSize({
+      width: el.width || 100,
+      height: el.height || 100
+    });
+    setResizeStartMouse({
+      x: e.clientX,
+      y: e.clientY
+    });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!resizingElement) return;
+      
+      const deltaX = e.clientX - resizeStartMouse.x;
+      const deltaY = e.clientY - resizeStartMouse.y;
+      
+      const newWidth = Math.max(50, resizeStartSize.width + deltaX);
+      const newHeight = Math.max(50, resizeStartSize.height + deltaY);
+      const size = Math.max(newWidth, newHeight);
+      
+      const currentEl = elements.find(el => el.id === resizingElement);
+      if (!currentEl) return;
+      
+      if (hasCollisionWithOthers(resizingElement, currentEl.x, currentEl.y, size, size)) {
+        return;
+      }
+      
+      setElements(prevElements => prevElements.map(el =>
+        el.id === resizingElement ? { ...el, width: size, height: size } : el
+      ));
+    };
+
+    const handleMouseUp = () => {
+      setResizingElement(null);
+    };
+
+    if (resizingElement) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingElement, resizeStartSize, resizeStartMouse, elements]);
+
   return (
     <div className="state-editor-container">
       {/* Header */}
@@ -1034,7 +1091,7 @@ const StateEditor = () => {
               fromX, fromY, toX, toY, 
               elements, 
               [conn.fromId, conn.toId],  // Exclude both connected nodes
-              40  // target radius for STATE circles
+              (toEl.width || 100) * 0.4  // target radius for STATE circles
             );
             
             const pathD = result.path;
@@ -1198,15 +1255,21 @@ const StateEditor = () => {
             ) : null}
 
             {selectedElement === el.id && !connectionMode && (
-              <button
-                className="element-delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteElement(el.id);
-                }}
-              >
-                ✕
-              </button>
+              <>
+                <button
+                  className="element-delete-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteElement(el.id);
+                  }}
+                >
+                  ✕
+                </button>
+                <div
+                  className="element-resize-handle"
+                  onMouseDown={(e) => handleResizeMouseDown(e, el)}
+                />
+              </>
             )}
           </div>
         ))}

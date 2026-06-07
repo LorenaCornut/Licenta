@@ -2,11 +2,11 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  user: 'postgres', // înlocuiește cu userul tău
-  host: 'localhost',
-  database: 'Licenta', // înlocuiește cu numele bazei tale
-  password: 'lorenaariana123', // înlocuiește cu parola ta
-  port: 5432,
+  user: process.env.DB_USER || 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  database: process.env.DB_NAME || 'Licenta',
+  password: process.env.DB_PASSWORD || 'lorenaariana123',
+  port: process.env.DB_PORT || 5432,
 });
 
 module.exports = pool;

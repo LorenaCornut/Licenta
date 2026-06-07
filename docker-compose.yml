@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: licenta_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-licenta_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./script_baza_de_date.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-licenta_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - licenta_network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: licenta_backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-licenta_db}
+      PORT: 5005
+    ports:
+      - "${BACKEND_PORT:-5005}:5005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - licenta_network
+    restart: unless-stopped
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./canvas2svg
+      dockerfile: Dockerfile
+    container_name: licenta_frontend
+    ports:
+      - "${FRONTEND_PORT:-3003}:80"
+    depends_on:
+      - backend
+    networks:
+      - licenta_network
+    restart: unless-stopped
+
+networks:
+  licenta_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local

@@ -45,7 +45,7 @@ function Dashboard() {
   // Fetch profile picture la mount
   useEffect(() => {
     if (userId) {
-      fetch(`http://localhost:5000/api/auth/profile/${userId}`)
+      fetch(`/api/auth/profile/${userId}`)
         .then(res => res.json())
         .then(data => {
           if (data.profile_picture) {
@@ -121,8 +121,8 @@ function Dashboard() {
     
     setLoadingDiagrams(true);
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/diagrams/user/${userId}`);
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      const response = await fetch(`${apiUrl}/diagrams/user/${userId}`);
       const data = await response.json();
       
       if (response.ok) {
@@ -277,8 +277,8 @@ function Dashboard() {
     setLoadingDesignsGrid(true);
 
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/diagrams/user/${userId}`);
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      const response = await fetch(`${apiUrl}/diagrams/user/${userId}`);
       const data = await response.json();
 
       if (response.ok) {
@@ -288,7 +288,7 @@ function Dashboard() {
         const previews = {};
         for (const diagram of (data.diagrams || [])) {
           try {
-            const detailResponse = await fetch(`${apiUrl}/api/diagrams/${diagram.id_diagrama}`);
+            const detailResponse = await fetch(`${apiUrl}/diagrams/${diagram.id_diagrama}`);
             const detailData = await detailResponse.json();
             
             const elements = detailData.elements || [];
@@ -336,8 +336,8 @@ function Dashboard() {
     if (designsForGrid.length === 0 && !loadingDesignsGrid && userId) {
       setLoadingDesignsGrid(true);
       try {
-        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-        const response = await fetch(`${apiUrl}/api/diagrams/user/${userId}`);
+        const apiUrl = process.env.REACT_APP_API_URL || '/api';
+        const response = await fetch(`${apiUrl}/diagrams/user/${userId}`);
         const data = await response.json();
 
         if (response.ok) {
@@ -347,7 +347,7 @@ function Dashboard() {
           const previews = {};
           for (const diagram of (data.diagrams || [])) {
             try {
-              const detailResponse = await fetch(`${apiUrl}/api/diagrams/${diagram.id_diagrama}`);
+              const detailResponse = await fetch(`${apiUrl}/diagrams/${diagram.id_diagrama}`);
               const detailData = await detailResponse.json();
               
               const elements = detailData.elements || [];

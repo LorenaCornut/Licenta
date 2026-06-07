@@ -673,7 +673,7 @@ function StateMachineDiagramEditor() {
   // Load diagram from database
   const loadDiagram = async (id) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/diagrams/${id}`);
+      const response = await fetch(`/api/diagrams/${id}`);
       const data = await response.json();
 
       // Backend returns: { diagram: {...}, elements: [...], connections: [...] }
@@ -754,7 +754,7 @@ function StateMachineDiagramEditor() {
         ...(diagramIdToUpdate && { diagramId: diagramIdToUpdate })
       };
 
-      const response = await fetch('http://localhost:5000/api/diagrams/save', {
+      const response = await fetch('/api/diagrams/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(diagramData)

@@ -625,7 +625,7 @@ function ActivityDiagramEditor() {
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/class-diagrams/${id}`);
+      const response = await fetch(`http://localhost:5005/api/class-diagrams/${id}`);
       const result = await response.json();
       console.log('Loaded diagram:', result);
       
@@ -924,7 +924,7 @@ function ActivityDiagramEditor() {
       let result;
 
       if (currentDiagramId) {
-        response = await fetch(`http://localhost:5000/api/class-diagrams/${currentDiagramId}`, {
+        response = await fetch(`http://localhost:5005/api/class-diagrams/${currentDiagramId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(diagramData)
@@ -942,7 +942,7 @@ function ActivityDiagramEditor() {
           ...diagramData
         };
 
-        response = await fetch('http://localhost:5000/api/class-diagrams', {
+        response = await fetch('http://localhost:5005/api/class-diagrams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newDiagramData)

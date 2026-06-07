@@ -374,8 +374,8 @@ function GraphEditor() {
   async function loadDiagram(id) {
     setIsLoading(true);
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/diagrams/${id}`);
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      const response = await fetch(`${apiUrl}/diagrams/${id}`);
       const data = await response.json();
 
       if (response.ok) {
@@ -441,9 +441,9 @@ function GraphEditor() {
     setSaveError("");
 
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
 
-      const response = await fetch(`${apiUrl}/api/diagrams/save`, {
+      const response = await fetch(`${apiUrl}/diagrams/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1558,6 +1558,35 @@ function GraphEditor() {
                       </button>
                     </foreignObject>
                   )}
+                  {edge.controlPoints && edge.controlPoints.map((cp, cpIdx) => (
+                    <circle
+                      key={`cp-${idx}-${cpIdx}`}
+                      cx={cp.x}
+                      cy={cp.y}
+                      r={6}
+                      fill="#8b5cf6"
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                      style={{ cursor: 'grab' }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setDraggingControlPoint({ edgeIdx: idx, pointIdx: cpIdx });
+                        setControlPointDragOffset({ x: 0, y: 0 });
+                      }}
+                      onClick={(e) => {
+                        if (e.altKey) {
+                          e.stopPropagation();
+                          setEdges(edges => edges.map((ed, i) => {
+                            if (i !== idx) return ed;
+                            const newCPs = [...(ed.controlPoints || [])];
+                            newCPs.splice(cpIdx, 1);
+                            return { ...ed, controlPoints: newCPs };
+                          }));
+                        }
+                      }}
+                      title="Trage pentru a muta, Alt+Click pentru a șterge"
+                    />
+                  ))}
                 </React.Fragment>
               );
             })}

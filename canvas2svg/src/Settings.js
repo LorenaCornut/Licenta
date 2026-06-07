@@ -38,7 +38,7 @@ function Settings() {
 
   const fetchUserData = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/profile/${userId}`);
+      const response = await fetch(`/api/auth/profile/${userId}`);
       if (!response.ok) {
         throw new Error('Nu s-au putut încărca datele');
       }
@@ -68,7 +68,7 @@ function Settings() {
     }
     
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/profile/${userId}/email`, {
+      const response = await fetch(`/api/auth/profile/${userId}/email`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: newEmail })
@@ -104,7 +104,7 @@ function Settings() {
     }
     
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/profile/${userId}/password`, {
+      const response = await fetch(`/api/auth/profile/${userId}/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -160,7 +160,7 @@ function Settings() {
     reader.onloadend = async () => {
       const base64 = reader.result;
       try {
-        const response = await fetch(`http://localhost:5000/api/auth/profile/${userId}/picture`, {
+        const response = await fetch(`/api/auth/profile/${userId}/picture`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ profilePicture: base64 })

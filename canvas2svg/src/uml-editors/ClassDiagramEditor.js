@@ -492,7 +492,7 @@ function ClassDiagramEditor() {
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/class-diagrams/${id}`);
+      const response = await fetch(`http://localhost:5005/api/class-diagrams/${id}`);
       const result = await response.json();
       if (result.diagram?.data) {
         setTitle(result.diagram.title || 'Untitled Diagram');
@@ -1110,7 +1110,7 @@ function ClassDiagramEditor() {
       if (activeDiagramId) {
         // UPDATE existing diagram
         method = 'PUT';
-        url = `http://localhost:5000/api/class-diagrams/${activeDiagramId}`;
+        url = `http://localhost:5005/api/class-diagrams/${activeDiagramId}`;
         response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
@@ -1125,7 +1125,7 @@ function ClassDiagramEditor() {
       } else {
         // CREATE new diagram
         method = 'POST';
-        url = 'http://localhost:5000/api/class-diagrams';
+        url = 'http://localhost:5005/api/class-diagrams';
         const newDiagramData = {
           title: diagramTitle,
           userId: parseInt(userId),

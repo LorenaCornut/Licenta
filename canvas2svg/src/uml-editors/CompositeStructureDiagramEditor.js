@@ -290,7 +290,7 @@ export default function CompositeStructureDiagramEditor() {
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/class-diagrams/${id}`);
+      const response = await fetch(`/api/class-diagrams/${id}`);
       const result = await response.json();
       
       if (result.diagram?.data) {
@@ -603,7 +603,7 @@ export default function CompositeStructureDiagramEditor() {
       let response, result;
       
       if (currentDiagramId) {
-        response = await fetch(`http://localhost:5000/api/class-diagrams/${currentDiagramId}`, {
+        response = await fetch(`/api/class-diagrams/${currentDiagramId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(diagramData)
@@ -620,7 +620,7 @@ export default function CompositeStructureDiagramEditor() {
           ...diagramData
         };
         
-        response = await fetch('http://localhost:5000/api/class-diagrams', {
+        response = await fetch('/api/class-diagrams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newDiagramData)

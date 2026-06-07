@@ -20,8 +20,8 @@ function CreateAccount() {
     }
     setError('');
     try {
-  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-  const response = await fetch(`${apiUrl}/api/auth/register`, {
+  const apiUrl = process.env.REACT_APP_API_URL || '/api';
+  const response = await fetch(`${apiUrl}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
