@@ -269,6 +269,15 @@ export default function CompositeStructureDiagramEditor() {
   const { diagramId } = useParams();
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
+
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
   const [title, setTitle] = useState('Composite Structure Diagram');
@@ -288,24 +297,37 @@ export default function CompositeStructureDiagramEditor() {
   const [dragOffset, setDragOffset] = useState({x: 0, y: 0});
 
   const loadDiagram = async (id) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(`/api/class-diagrams/${id}`);
-      const result = await response.json();
-      
-      if (result.diagram?.data) {
-        setTitle(result.diagram.title || 'Composite Structure Diagram');
-        setElements(result.diagram.data.elements || []);
-        const loadedConnections = result.diagram.data.connections || [];
-        setConnections(ensureConnectionOffsets(loadedConnections));
-        sessionStorage.setItem('currentDiagramId', id);
-      }
-    } catch (error) {
-      console.error('Error loading:', error);
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      window.location.href = '/login';
+      return;
     }
-  };
+    
+    const result = await response.json();
+    
+    if (result.diagram?.data) {
+      setTitle(result.diagram.title || 'Composite Structure Diagram');
+      setElements(result.diagram.data.elements || []);
+      const loadedConnections = result.diagram.data.connections || [];
+      setConnections(ensureConnectionOffsets(loadedConnections));
+      sessionStorage.setItem('currentDiagramId', id);
+    }
+  } catch (error) {
+    console.error('Error loading:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
@@ -576,72 +598,102 @@ export default function CompositeStructureDiagramEditor() {
   }, [draggingEndpoint, connections, elements, canvasRef]);
 
   const handleSaveToDatabase = async () => {
-    const currentDiagramId = sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = currentDiagramId 
-      ? title 
-      : prompt('Enter diagram name:', title || 'Composite Structure Diagram');
-    
-    if (!diagramTitle) return;
+  // <-- ADAUGAT: Verifică token-ul
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a salva diagrama!');
+    window.location.href = '/login';
+    return;
+  }
+  
+  const currentDiagramId = sessionStorage.getItem('currentDiagramId');
+  const diagramTitle = currentDiagramId 
+    ? title 
+    : prompt('Enter diagram name:', title || 'Composite Structure Diagram');
+  
+  if (!diagramTitle) return;
 
-    try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
-        alert('You must be logged in to save!');
+  try {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      alert('You must be logged in to save!');
+      window.location.href = '/login';
+      return;
+    }
+
+    const connectionsToSave = ensureConnectionOffsets(connections);
+
+    const diagramData = {
+      diagram: {
+        selectedType: 'COMPOSITE_STRUCTURE',
+        elements: elements,
+        connections: connectionsToSave
+      }
+    };
+
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    let response, result;
+    
+    if (currentDiagramId) {
+      response = await fetch(`${apiUrl}/class-diagrams/${currentDiagramId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(diagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        window.location.href = '/login';
         return;
       }
-
-      const connectionsToSave = ensureConnectionOffsets(connections);
-
-      const diagramData = {
-        diagram: {
-          selectedType: 'COMPOSITE_STRUCTURE',
-          elements: elements,
-          connections: connectionsToSave
-        }
-      };
-
-      let response, result;
       
-      if (currentDiagramId) {
-        response = await fetch(`/api/class-diagrams/${currentDiagramId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(diagramData)
-        });
-        result = await response.json();
-        
-        if (response.ok) {
-          alert(`Diagram "${diagramTitle}" updated successfully!`);
-        }
-      } else {
-        const newDiagramData = {
-          title: diagramTitle,
-          userId: parseInt(userId),
-          ...diagramData
-        };
-        
-        response = await fetch('/api/class-diagrams', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newDiagramData)
-        });
-        result = await response.json();
-        
-        if (response.ok) {
-          alert(`Diagram "${diagramTitle}" saved successfully! ID: ${result.diagramId}`);
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-          setTitle(diagramTitle);
-        }
+      result = await response.json();
+      
+      if (response.ok) {
+        alert(`Diagram "${diagramTitle}" updated successfully!`);
       }
-
-      if (!response.ok) {
-        alert(`Error: ${result.error}`);
+    } else {
+      const newDiagramData = {
+        title: diagramTitle,
+        userId: parseInt(userId),
+        ...diagramData
+      };
+      
+      response = await fetch(`${apiUrl}/class-diagrams`, {
+        method: 'POST',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(newDiagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        window.location.href = '/login';
+        return;
       }
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      alert(`Save error: ${error.message}`);
+      
+      result = await response.json();
+      
+      if (response.ok) {
+        alert(`Diagram "${diagramTitle}" saved successfully! ID: ${result.diagramId}`);
+        sessionStorage.setItem('currentDiagramId', result.diagramId);
+        setTitle(diagramTitle);
+      }
     }
-  };
+
+    if (!response.ok) {
+      alert(`Error: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error saving to database:', error);
+    alert(`Save error: ${error.message}`);
+  }
+};
 
   const handleExportSVG = () => {
     const svg = generateFullSVG(elements, connections, title);

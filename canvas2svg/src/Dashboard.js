@@ -10,6 +10,16 @@ function Dashboard() {
   const userName = localStorage.getItem('username') || '';
   const userId = localStorage.getItem('userId');
   const navigate = useNavigate();
+
+  // <-- ADAUGAT: Funcție pentru a obține headers cu token
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
+
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
   const createBtnRef = useRef(null);
@@ -43,18 +53,32 @@ function Dashboard() {
   const umlModalRef = useRef(null);
 
   // Fetch profile picture la mount
-  useEffect(() => {
-    if (userId) {
-      fetch(`/api/auth/profile/${userId}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.profile_picture) {
-            setProfilePicture(data.profile_picture);
-          }
-        })
-        .catch(err => console.error('Error fetching profile:', err));
-    }
-  }, [userId]);
+  // Fetch profile picture la mount
+useEffect(() => {
+  if (userId) {
+    // <-- SCHIMBAT: Folosește ruta nouă fără userId și adaugă headers
+    fetch('/api/auth/profile', {
+      headers: getAuthHeaders()  // <-- ADAUGAT headers cu token
+    })
+      .then(res => {
+        if (res.status === 401) {
+          // Token invalid, redirect la login
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          localStorage.removeItem('userId');
+          navigate('/login');
+          return null;
+        }
+        return res.json();
+      })
+      .then(data => {
+        if (data && data.profile_picture) {
+          setProfilePicture(data.profile_picture);
+        }
+      })
+      .catch(err => console.error('Error fetching profile:', err));
+  }
+}, [userId, navigate]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -108,34 +132,46 @@ function Dashboard() {
 
   // Funcție pentru a obține diagramele salvate
   async function fetchSavedDiagrams() {
-    // Dacă meniul e deja deschis, doar îl închidem
-    if (showStartMenu) {
-      setShowStartMenu(false);
-      return;
-    }
-    
-    if (!userId) {
-      alert('Trebuie să fii autentificat pentru a vedea diagramele salvate!');
-      return;
-    }
-    
-    setLoadingDiagrams(true);
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      const response = await fetch(`${apiUrl}/diagrams/user/${userId}`);
-      const data = await response.json();
-      
-      if (response.ok) {
-        setSavedDiagrams(data.diagrams || []);
-        setShowStartMenu(true);
-      } else {
-        alert(data.message || 'Eroare la încărcarea diagramelor!');
-      }
-    } catch (err) {
-      alert('Eroare de rețea sau server!');
-    }
-    setLoadingDiagrams(false);
+  if (showStartMenu) {
+    setShowStartMenu(false);
+    return;
   }
+  
+  if (!userId) {
+    alert('Trebuie să fii autentificat pentru a vedea diagramele salvate!');
+    return;
+  }
+  
+  setLoadingDiagrams(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- SCHIMBAT: Folosește ruta nouă /user/list
+    const response = await fetch(`${apiUrl}/diagrams/user/list`, {
+      headers: getAuthHeaders()  // <-- ADAUGAT headers cu token
+    });
+    
+    if (response.status === 401) {
+      // Token invalid
+      localStorage.removeItem('token');
+      localStorage.removeItem('username');
+      localStorage.removeItem('userId');
+      navigate('/login');
+      return;
+    }
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      setSavedDiagrams(data.diagrams || []);
+      setShowStartMenu(true);
+    } else {
+      alert(data.message || 'Eroare la încărcarea diagramelor!');
+    }
+  } catch (err) {
+    alert('Eroare de rețea sau server!');
+  }
+  setLoadingDiagrams(false);
+}
 
   // Funcție pentru a deschide o diagramă
   function openDiagram(diagram) {
@@ -263,53 +299,72 @@ function Dashboard() {
 
   // Funcție pentru a prelua designuri și a le afișa în grid
   async function handleMyDesignsClick() {
-    if (activeTab === 'my-designs') {
-      setActiveTab(null);
-      return;
-    }
-
-    if (!userId) {
-      alert('Trebuie să fii autentificat!');
-      return;
-    }
-
-    setActiveTab('my-designs');
-    setLoadingDesignsGrid(true);
-
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      const response = await fetch(`${apiUrl}/diagrams/user/${userId}`);
-      const data = await response.json();
-
-      if (response.ok) {
-        setDesignsForGrid(data.diagrams || []);
-        
-        // Preload previews pentru fiecare design
-        const previews = {};
-        for (const diagram of (data.diagrams || [])) {
-          try {
-            const detailResponse = await fetch(`${apiUrl}/diagrams/${diagram.id_diagrama}`);
-            const detailData = await detailResponse.json();
-            
-            const elements = detailData.elements || [];
-            const connections = detailData.connections || [];
-            previews[diagram.id_diagrama] = generatePreviewSVG(elements, connections);
-          } catch (err) {
-            console.error('Error loading diagram detail:', err);
-            previews[diagram.id_diagrama] = generatePreviewSVG([], []);
-          }
-        }
-        setDesignPreviews(previews);
-      } else {
-        alert('Eroare la încărcarea design-urilor');
-      }
-    } catch (err) {
-      console.error('Error:', err);
-      alert('Eroare de rețea');
-    }
-
-    setLoadingDesignsGrid(false);
+  if (activeTab === 'my-designs') {
+    setActiveTab(null);
+    return;
   }
+
+  if (!userId) {
+    alert('Trebuie să fii autentificat!');
+    return;
+  }
+
+  setActiveTab('my-designs');
+  setLoadingDesignsGrid(true);
+
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- SCHIMBAT: Folosește ruta nouă /user/list
+    const response = await fetch(`${apiUrl}/diagrams/user/list`, {
+      headers: getAuthHeaders()  // <-- ADAUGAT headers cu token
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('username');
+      localStorage.removeItem('userId');
+      navigate('/login');
+      return;
+    }
+    
+    const data = await response.json();
+
+    if (response.ok) {
+      setDesignsForGrid(data.diagrams || []);
+      
+      // Preload previews pentru fiecare design
+      const previews = {};
+      for (const diagram of (data.diagrams || [])) {
+        try {
+          const detailResponse = await fetch(`${apiUrl}/diagrams/${diagram.id_diagrama}`, {
+            headers: getAuthHeaders()  // <-- ADAUGAT headers și la request-urile de detalii
+          });
+          
+          if (detailResponse.status === 401) {
+            throw new Error('Unauthorized');
+          }
+          
+          const detailData = await detailResponse.json();
+          
+          const elements = detailData.elements || [];
+          const connections = detailData.connections || [];
+          previews[diagram.id_diagrama] = generatePreviewSVG(elements, connections);
+        } catch (err) {
+          console.error('Error loading diagram detail:', err);
+          previews[diagram.id_diagrama] = generatePreviewSVG([], []);
+        }
+      }
+      setDesignPreviews(previews);
+    } else {
+      alert('Eroare la încărcarea design-urilor');
+    }
+  } catch (err) {
+    console.error('Error:', err);
+    alert('Eroare de rețea');
+  }
+
+  setLoadingDesignsGrid(false);
+}
 
   // Obține sugestiile pe baza query-ului
   function getSearchSuggestions() {
@@ -333,40 +388,51 @@ function Dashboard() {
 
   // Încarcă designs dacă nu sunt încărcați și utilizatorul tipărește în search
   async function loadDesignsIfNeeded() {
-    if (designsForGrid.length === 0 && !loadingDesignsGrid && userId) {
-      setLoadingDesignsGrid(true);
-      try {
-        const apiUrl = process.env.REACT_APP_API_URL || '/api';
-        const response = await fetch(`${apiUrl}/diagrams/user/${userId}`);
-        const data = await response.json();
-
-        if (response.ok) {
-          setDesignsForGrid(data.diagrams || []);
-          
-          // Preload previews
-          const previews = {};
-          for (const diagram of (data.diagrams || [])) {
-            try {
-              const detailResponse = await fetch(`${apiUrl}/diagrams/${diagram.id_diagrama}`);
-              const detailData = await detailResponse.json();
-              
-              const elements = detailData.elements || [];
-              const connections = detailData.connections || [];
-              previews[diagram.id_diagrama] = generatePreviewSVG(elements, connections);
-            } catch (err) {
-              console.error('Error loading diagram detail:', err);
-              previews[diagram.id_diagrama] = generatePreviewSVG([], []);
-            }
-          }
-          setDesignPreviews(previews);
-          setActiveTab('my-designs');
-        }
-      } catch (err) {
-        console.error('Error loading designs:', err);
+  if (designsForGrid.length === 0 && !loadingDesignsGrid && userId) {
+    setLoadingDesignsGrid(true);
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      // <-- SCHIMBAT: Folosește ruta nouă /user/list
+      const response = await fetch(`${apiUrl}/diagrams/user/list`, {
+        headers: getAuthHeaders()  // <-- ADAUGAT headers cu token
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        navigate('/login');
+        return;
       }
-      setLoadingDesignsGrid(false);
+      
+      const data = await response.json();
+
+      if (response.ok) {
+        setDesignsForGrid(data.diagrams || []);
+        
+        const previews = {};
+        for (const diagram of (data.diagrams || [])) {
+          try {
+            const detailResponse = await fetch(`${apiUrl}/diagrams/${diagram.id_diagrama}`, {
+              headers: getAuthHeaders()
+            });
+            const detailData = await detailResponse.json();
+            
+            const elements = detailData.elements || [];
+            const connections = detailData.connections || [];
+            previews[diagram.id_diagrama] = generatePreviewSVG(elements, connections);
+          } catch (err) {
+            console.error('Error loading diagram detail:', err);
+            previews[diagram.id_diagrama] = generatePreviewSVG([], []);
+          }
+        }
+        setDesignPreviews(previews);
+        setActiveTab('my-designs');
+      }
+    } catch (err) {
+      console.error('Error loading designs:', err);
     }
+    setLoadingDesignsGrid(false);
   }
+}
 
   function handleHelp() {
     navigate('/help');
@@ -375,11 +441,13 @@ function Dashboard() {
     navigate('/info');
   }
   function handleLogout() {
-    // Exemplu: șterge userul din localStorage/context
-    localStorage.removeItem('username');
-    localStorage.removeItem('userId');
-    navigate('/');
-  }
+  // <-- MODIFICAT: Șterge și token-ul
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('username');
+  localStorage.removeItem('userId');
+  navigate('/');
+}
 
   // Handler pentru selectarea unui tip UML
   function handleUMLTypeSelect(type) {

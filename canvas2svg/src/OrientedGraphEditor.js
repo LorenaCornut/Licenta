@@ -333,6 +333,14 @@ function createArrowhead(arrowX, arrowY, direction, size = 18) {
 function OrientedGraphEditor() {
   const { diagramId } = useParams();
   const navigate = useNavigate();
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
   
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -416,10 +424,22 @@ function OrientedGraphEditor() {
   // Funcție pentru a încărca o diagramă din baza de date
   async function loadDiagram(id) {
     setIsLoading(true);
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      const response = await fetch(`${apiUrl}/diagrams/${id}`);
-      const data = await response.json();
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
+      return;
+    }
+    
+    const data = await response.json();
 
       if (response.ok) {
         setNodes(data.nodes || []);
@@ -451,10 +471,13 @@ function OrientedGraphEditor() {
   // Funcție pentru salvarea diagramei în baza de date
   async function handleSave() {
     const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
-      alert('Trebuie să te autentifici din nou pentru a salva diagrama!');
-      return;
-    }
+  const token = localStorage.getItem('token'); // <-- ADAUGAT verificare token
+  
+  if (!userId || userId === 'null' || userId === 'undefined' || !token) { // <-- SCHIMBAT
+    alert('Trebuie să te autentifici din nou pentru a salva diagrama!');
+    navigate('/login'); // <-- ADAUGAT redirect
+    return;
+  }
     
     if (nodes.length === 0) {
       alert('Nu ai niciun nod în diagramă. Adaugă cel puțin un nod înainte de a salva!');
@@ -467,48 +490,56 @@ function OrientedGraphEditor() {
 
   // Funcție pentru confirmarea salvării
   async function confirmSave() {
-    if (!diagramTitle.trim()) {
-      setSaveError('Te rog introdu un nume pentru diagramă!');
-      return;
-    }
+   if (!diagramTitle.trim()) {
+    setSaveError('Te rog introdu un nume pentru diagramă!');
+    return;
+  }
 
-    const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
-      setSaveError('Sesiune expirată. Te rog reautentifică-te!');
-      return;
-    }
+  const userId = localStorage.getItem('userId');
+  if (!userId || userId === 'null' || userId === 'undefined') {
+    setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+    return;
+  }
 
-    setIsSaving(true);
-    setSaveError("");
+  setIsSaving(true);
+  setSaveError("");
 
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
 
-      const response = await fetch(`${apiUrl}/diagrams/save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: parseInt(userId),
-          title: diagramTitle.trim(),
-          tipDiagrama: 'Graf orientat',
-          nodes: nodes,
-          // Save only user-adjusted control points (if any exist)
-          edges: edges.map(e => {
-            const edge = { from: e.from, to: e.to };
-            // Only include controlPoints if user manually adjusted them
-            if (e.controlPoints && e.controlPoints.length > 0) {
-              const userAdjusted = e.controlPoints.filter(pt => pt && pt.isUserAdjusted);
-              if (userAdjusted.length > 0) {
-                edge.controlPoints = userAdjusted;
-              }
+    const response = await fetch(`${apiUrl}/diagrams/save`, {
+      method: 'POST',
+      headers: getAuthHeaders(), // <-- SCHIMBAT: folosește getAuthHeaders()
+      body: JSON.stringify({
+        userId: parseInt(userId),
+        title: diagramTitle.trim(),
+        tipDiagrama: 'Graf orientat',
+        nodes: nodes,
+        edges: edges.map(e => {
+          const edge = { from: e.from, to: e.to };
+          if (e.controlPoints && e.controlPoints.length > 0) {
+            const userAdjusted = e.controlPoints.filter(pt => pt && pt.isUserAdjusted);
+            if (userAdjusted.length > 0) {
+              edge.controlPoints = userAdjusted;
             }
-            return edge;
-          }),
-          diagramId: currentDiagramId
-        })
-      });
+          }
+          return edge;
+        }),
+        diagramId: currentDiagramId
+      })
+    });
 
-      const data = await response.json();
+    if (response.status === 401) {
+      setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      setIsSaving(false);
+      setTimeout(() => navigate('/login'), 1500);
+      return;
+    }
+
+    const data = await response.json();
 
       if (!response.ok) {
         setSaveError(data.message || 'Eroare la salvarea diagramei!');

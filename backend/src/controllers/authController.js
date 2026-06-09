@@ -1,10 +1,26 @@
 const User = require('../models/user');
 const bcrypt = require('bcrypt');
 const pool = require('../db');
+const jwt = require('jsonwebtoken'); // <-- ADUAGĂ ASTA
 
-// Variabile temporare pentru stare user conectat
-let isLoggedIn = 0;
-let loggedInUsername = null;
+// NU MAI AI NEVOIE DE VARIABILELE TEMPORARE
+// let isLoggedIn = 0;  <-- ȘTERGE
+// let loggedInUsername = null;  <-- ȘTERGE
+
+// Funcție pentru generare token
+const generateToken = (userId, username) => {
+  // Verifică dacă secretul există
+  if (!process.env.JWT_SECRET) {
+    console.error('JWT_SECRET is not defined! Check your .env file');
+    throw new Error('JWT_SECRET is not configured');
+  }
+  
+  return jwt.sign(
+    { id: userId, username: username },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+};
 
 exports.login = async (req, res) => {
   const { username, password } = req.body;
@@ -13,13 +29,26 @@ exports.login = async (req, res) => {
     if (!user) {
       return res.status(400).json({ message: 'username sau parola incorecta' });
     }
+    
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
       return res.status(400).json({ message: 'username sau parola incorecta' });
     }
-    isLoggedIn = 1;
-    loggedInUsername = username;
-    return res.status(200).json({ message: 'autentificare reusita', user: { id: user.id_user, username: user.username, email: user.email }, isLoggedIn, loggedInUsername });
+    
+    // GENEREAZĂ TOKEN JWT
+    const token = generateToken(user.id_user, user.username);
+    
+    // TRIMITE TOKEN-UL ÎN RĂSPUNS
+    return res.status(200).json({ 
+      message: 'autentificare reusita',
+      token: token,  // <-- ASTA E NOU
+      user: { 
+        id: user.id_user, 
+        username: user.username, 
+        email: user.email 
+      }
+    });
+    
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Eroare server', error: err.message });
@@ -29,36 +58,47 @@ exports.login = async (req, res) => {
 exports.register = async (req, res) => {
   const { username, email, password } = req.body;
   try {
-    // Verifică dacă username-ul există
     const userByUsername = await User.findByUsername(username);
     if (userByUsername) {
       return res.status(400).json({ message: 'numele de utilizator este deja folosit' });
     }
-    // Verifică dacă email-ul există
+    
     const userByEmail = await User.findByEmail(email);
     if (userByEmail) {
       return res.status(400).json({ message: 'email ul este deja utilizat' });
     }
-    // Hash-uiește parola
+    
     const password_hash = await bcrypt.hash(password, 10);
-    // Creează userul
     const newUser = await User.create(username, email, password_hash);
-    // Setează variabilele de stare
-    isLoggedIn = 1;
-    loggedInUsername = username;
-    return res.status(201).json({ message: 'cont creat cu succes', user: { id: newUser.id_user, username, email }, isLoggedIn, loggedInUsername });
+    
+    // GENEREAZĂ TOKEN JWT PENTRU USERUL NOU
+    const token = generateToken(newUser.id_user, username);
+    
+    return res.status(201).json({ 
+      message: 'cont creat cu succes',
+      token: token,  // <-- ASTA E NOU
+      user: { 
+        id: newUser.id_user, 
+        username, 
+        email 
+      }
+    });
+    
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Eroare server', error: err.message });
   }
 };
 
-// Exportă și variabilele pentru test/demo
-exports.getLoginState = () => ({ isLoggedIn, loggedInUsername });
+// NU MAI AI NEVOIE DE getLoginState
+// exports.getLoginState = () => ({ isLoggedIn, loggedInUsername }); <-- ȘTERGE
+
+// RESTUL FUNCȚIILOR RĂMÂN LA FEL, DOAR ADAUGĂ VERIFICARE TOKEN
+// (getProfile, updateEmail, updatePassword, updateProfilePicture)
 
 // Get user profile
 exports.getProfile = async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id;
   try {
     const result = await pool.query(
       'SELECT id_user, username, email, created_at, profile_picture FROM users WHERE id_user = $1',
@@ -76,7 +116,7 @@ exports.getProfile = async (req, res) => {
 
 // Update user email
 exports.updateEmail = async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id;
   const { email } = req.body;
   try {
     // Check if email already exists
@@ -97,7 +137,7 @@ exports.updateEmail = async (req, res) => {
 
 // Update user password
 exports.updatePassword = async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id;
   const { currentPassword, newPassword } = req.body;
   try {
     // Get current user
@@ -128,7 +168,7 @@ exports.updatePassword = async (req, res) => {
 
 // Update profile picture
 exports.updateProfilePicture = async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id;
   const { profilePicture } = req.body;
   try {
     await pool.query(

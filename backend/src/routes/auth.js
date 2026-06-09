@@ -1,18 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const authenticateToken = require('../middleware/auth'); // <-- ADUAGĂ
 
-
-// Ruta pentru creare cont
+// Rute publice (nu necesită autentificare)
 router.post('/register', authController.register);
-
-// Ruta pentru login
 router.post('/login', authController.login);
 
-// Rute pentru profil
-router.get('/profile/:userId', authController.getProfile);
-router.put('/profile/:userId/email', authController.updateEmail);
-router.put('/profile/:userId/password', authController.updatePassword);
-router.put('/profile/:userId/picture', authController.updateProfilePicture);
+// Rute protejate (necesită token valid)
+router.get('/profile', authenticateToken, authController.getProfile);
+router.put('/profile/email', authenticateToken, authController.updateEmail);
+router.put('/profile/password', authenticateToken, authController.updatePassword);
+router.put('/profile/picture', authenticateToken, authController.updateProfilePicture);
 
 module.exports = router;

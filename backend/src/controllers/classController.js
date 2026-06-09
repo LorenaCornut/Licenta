@@ -68,14 +68,16 @@ exports.saveClassDiagram = async (req, res) => {
   const client = await pool.connect();
   
   try {
-    const { title, userId, diagram } = req.body;
+    const { title, diagram } = req.body;
+    const userId = req.user.id; // <-- SCHIMBAT: ia ID-ul din token, nu din body
     
-    if (!title || !userId || !diagram) {
-      return res.status(400).json({ error: 'Missing required fields: title, userId, diagram' });
+    if (!title || !diagram) {
+      return res.status(400).json({ error: 'Missing required fields: title, diagram' });
     }
 
+    // Restul codului rămâne la fel...
     const { selectedType, elements, connections } = diagram;
-
+    
     await client.query('BEGIN');
 
     // 1. Get or create diagram type based on selectedType
@@ -225,6 +227,7 @@ exports.saveClassDiagram = async (req, res) => {
 exports.getClassDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
+    const userId = req.user.id; // <-- ADAUGAT
 
     // Get diagram metadata (including type)
     const diagramResult = await pool.query(
@@ -240,6 +243,11 @@ exports.getClassDiagram = async (req, res) => {
     }
 
     const diagram = diagramResult.rows[0];
+    
+    // <-- ADAUGAT: VERIFICĂ PERMISIUNI
+    if (diagram.id_user !== parseInt(userId)) {
+      return res.status(403).json({ error: 'Access denied. This diagram does not belong to you.' });
+    }
 
     // Get all elements (componente_existente)
     const elementsResult = await pool.query(
@@ -325,9 +333,26 @@ exports.updateClassDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
     const { diagram } = req.body;
+    const userId = req.user.id; // <-- ADAUGAT
 
     if (!diagram) {
       return res.status(400).json({ error: 'Missing diagram data' });
+    }
+
+    await client.query('BEGIN');
+
+    // <-- ADAUGAT: VERIFICĂ DACĂ DIAGRAMA EXISTĂ ȘI APARȚINE USERULUI
+    const checkResult = await client.query(
+      'SELECT id_user FROM diagrame WHERE id_diagrama = $1',
+      [diagramId]
+    );
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Diagram not found' });
+    }
+    
+    if (checkResult.rows[0].id_user !== parseInt(userId)) {
+      return res.status(403).json({ error: 'Access denied. You can only update your own diagrams.' });
     }
 
     const { selectedType, elements, connections } = diagram;
@@ -469,10 +494,11 @@ exports.updateClassDiagram = async (req, res) => {
 exports.deleteClassDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
+    const userId = req.user.id; // <-- ADAUGAT (asigură-te că middleware-ul există)
 
     const result = await pool.query(
       'DELETE FROM diagrame WHERE id_diagrama = $1 AND id_user = $2',
-      [diagramId, req.user?.id] // Ensure user can only delete their own diagrams
+      [diagramId, userId] // <-- SCHIMBAT: folosește userId din token
     );
 
     if (result.rowCount === 0) {
@@ -492,7 +518,7 @@ exports.deleteClassDiagram = async (req, res) => {
  */
 exports.listClassDiagrams = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user.id; // <-- SCHIMBAT: ia din token, nu din params
 
     const result = await pool.query(
       `SELECT d.id_diagrama, d.titlu, d.data_create, d.data_update, t.nume_tip
@@ -500,7 +526,7 @@ exports.listClassDiagrams = async (req, res) => {
        LEFT JOIN tipuri_diagrame t ON d.id_tip = t.id_tip
        WHERE d.id_user = $1
        ORDER BY d.data_update DESC`,
-      [userId]
+      [userId] // <-- SCHIMBAT: folosește userId din token
     );
 
     res.json({

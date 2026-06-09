@@ -226,6 +226,14 @@ function PetriNetEditor() {
   const navigate = useNavigate();
   const { diagramId } = useParams();
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
+
   // State pentru elemente
   const [places, setPlaces] = useState([]); // {id, x, y, label, tokens}
   const [transitions, setTransitions] = useState([]); // {id, x, y, label}
@@ -248,44 +256,56 @@ function PetriNetEditor() {
 
   const handleSave = async () => {
     const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
-      alert('Trebuie să te autentifici pentru a salva diagramele!');
-      return;
-    }
+  const token = localStorage.getItem('token'); // <-- ADAUGAT verificare token
+  
+  if (!userId || userId === 'null' || userId === 'undefined' || !token) { // <-- SCHIMBAT
+    alert('Trebuie să te autentifici pentru a salva diagramele!');
+    navigate('/login'); // <-- ADAUGAT redirect
+    return;
+  }
 
-    if (places.length === 0 && transitions.length === 0) {
-      alert('Adaugă cel puțin o poziție sau o tranziție înainte de a salva!');
-      return;
-    }
+  if (places.length === 0 && transitions.length === 0) {
+    alert('Adaugă cel puțin o poziție sau o tranziție înainte de a salva!');
+    return;
+  }
 
-    setIsSaving(true);
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      const response = await fetch(`${apiUrl}/petri-nets/save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: parseInt(userId),
-          title: diagramName.trim() || 'Rețea Petri',
-          places: places,
-          transitions: transitions,
-          // Save only user-adjusted control points in arcs (if any exist)
-          arcs: arcs.map(a => {
-            const arc = { from: a.from, to: a.to, id: a.id };
-            // Only include controlPoints if user manually adjusted them
-            if (a.controlPoints && a.controlPoints.length > 0) {
-              const userAdjusted = a.controlPoints.filter(pt => pt && pt.isUserAdjusted);
-              if (userAdjusted.length > 0) {
-                arc.controlPoints = userAdjusted;
-              }
+  setIsSaving(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    const response = await fetch(`${apiUrl}/petri-nets/save`, {
+      method: 'POST',
+      headers: getAuthHeaders(), // <-- SCHIMBAT: folosește getAuthHeaders()
+      body: JSON.stringify({
+        userId: parseInt(userId),
+        title: diagramName.trim() || 'Rețea Petri',
+        places: places,
+        transitions: transitions,
+        arcs: arcs.map(a => {
+          const arc = { from: a.from, to: a.to };
+          if (a.controlPoints && a.controlPoints.length > 0) {
+            const userAdjusted = a.controlPoints.filter(pt => pt && pt.isUserAdjusted);
+            if (userAdjusted.length > 0) {
+              arc.controlPoints = userAdjusted;
             }
-            return arc;
-          }),
-          diagramId: diagramId
-        })
-      });
+          }
+          return arc;
+        }),
+        diagramId: diagramId
+      })
+    });
 
-      const data = await response.json();
+    if (response.status === 401) {
+      console.error('❌ Sesiune expirată');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      setIsSaving(false);
+      alert('Sesiunea a expirat. Te rog să te autentifici din nou.');
+      navigate('/login');
+      return;
+    }
+
+    const data = await response.json();
 
       if (response.ok) {
         setIsSaving(false);
@@ -320,31 +340,42 @@ function PetriNetEditor() {
   }, [diagramId]); // Depend on diagramId to reload when URL changes
 
   const loadPetriDiagram = async () => {
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      console.log(`Fetching from: ${apiUrl}/petri-nets/${diagramId}`);
-      
-      const response = await fetch(`${apiUrl}/petri-nets/${diagramId}`);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    console.log(`Fetching from: ${apiUrl}/petri-nets/${diagramId}`);
+    
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/petri-nets/${diagramId}`, {
+      headers: getAuthHeaders()
+    });
 
-      if (!response.ok) {
-        console.error(`Failed to load diagram: ${response.status}`);
-        return;
-      }
-
-      const data = await response.json();
-      console.log(`Loaded diagram:`, data);
-      
-      // Încarcă datele în state
-      setDiagramName(data.diagram.title);
-      setPlaces(data.places || []);
-      setTransitions(data.transitions || []);
-      setArcs(data.arcs || []);
-      
-      console.log(`✓ Rețea Petri încărcată: ${data.diagram.title}`);
-    } catch (err) {
-      console.error('Eroare la încărcarea diagramei:', err);
+    if (response.status === 401) {
+      console.error('❌ Sesiune expirată la încărcare');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
+      return;
     }
-  };
+
+    if (!response.ok) {
+      console.error(`Failed to load diagram: ${response.status}`);
+      return;
+    }
+
+    const data = await response.json();
+    console.log(`Loaded diagram:`, data);
+    
+    setDiagramName(data.diagram.title);
+    setPlaces(data.places || []);
+    setTransitions(data.transitions || []);
+    setArcs(data.arcs || []);
+    
+    console.log(`✓ Rețea Petri încărcată: ${data.diagram.title}`);
+  } catch (err) {
+    console.error('Eroare la încărcarea diagramei:', err);
+  }
+};
 
   // ============ CONSTANTS ============
 
@@ -699,67 +730,75 @@ function PetriNetEditor() {
   };
 
   const handleImportJSON = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const diagram = JSON.parse(event.target.result);
-        setDiagramName(diagram.name || '');
-        setPlaces(diagram.places || []);
-        setTransitions(diagram.transitions || []);
-        setArcs(diagram.arcs || []);
-      } catch (err) {
-        alert('Eroare la importul diagramei: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
+  // <-- Verifică opțional dacă e autentificat
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Te rugăm să te autentifici înainte de a importa!');
+    navigate('/login');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const diagram = JSON.parse(event.target.result);
+      setDiagramName(diagram.name || '');
+      setPlaces(diagram.places || []);
+      setTransitions(diagram.transitions || []);
+      setArcs(diagram.arcs || []);
+    } catch (err) {
+      alert('Eroare la importul diagramei: ' + err.message);
+    }
   };
+  reader.readAsText(file);
+};
 
   const handleExportSVG = () => {
-    if (places.length === 0 && transitions.length === 0) {
-      return;
+  if (places.length === 0 && transitions.length === 0) {
+    return;
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+  // Calculate bounds including arcs
+  places.forEach(p => {
+    minX = Math.min(minX, p.x - PLACE_RADIUS);
+    minY = Math.min(minY, p.y - PLACE_RADIUS);
+    maxX = Math.max(maxX, p.x + PLACE_RADIUS);
+    maxY = Math.max(maxY, p.y + PLACE_RADIUS);
+  });
+
+  transitions.forEach(t => {
+    minX = Math.min(minX, t.x - TRANSITION_WIDTH / 2);
+    minY = Math.min(minY, t.y - TRANSITION_HEIGHT / 2);
+    maxX = Math.max(maxX, t.x + TRANSITION_WIDTH / 2);
+    maxY = Math.max(maxY, t.y + TRANSITION_HEIGHT / 2);
+  });
+
+  arcs.forEach(arc => {
+    if (arc.controlPoints && arc.controlPoints.length > 0) {
+      arc.controlPoints.forEach(pt => {
+        minX = Math.min(minX, pt.x);
+        minY = Math.min(minY, pt.y);
+        maxX = Math.max(maxX, pt.x);
+        maxY = Math.max(maxY, pt.y);
+      });
     }
+  });
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const padding = 40;
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
 
-    // Calculate bounds including arcs
-    places.forEach(p => {
-      minX = Math.min(minX, p.x - PLACE_RADIUS);
-      minY = Math.min(minY, p.y - PLACE_RADIUS);
-      maxX = Math.max(maxX, p.x + PLACE_RADIUS);
-      maxY = Math.max(maxY, p.y + PLACE_RADIUS);
-    });
+  const width = maxX - minX;
+  const height = maxY - minY;
 
-    transitions.forEach(t => {
-      minX = Math.min(minX, t.x - TRANSITION_WIDTH / 2);
-      minY = Math.min(minY, t.y - TRANSITION_HEIGHT / 2);
-      maxX = Math.max(maxX, t.x + TRANSITION_WIDTH / 2);
-      maxY = Math.max(maxY, t.y + TRANSITION_HEIGHT / 2);
-    });
-
-    arcs.forEach(arc => {
-      if (arc.controlPoints && arc.controlPoints.length > 0) {
-        arc.controlPoints.forEach(pt => {
-          minX = Math.min(minX, pt.x);
-          minY = Math.min(minY, pt.y);
-          maxX = Math.max(maxX, pt.x);
-          maxY = Math.max(maxY, pt.y);
-        });
-      }
-    });
-
-    const padding = 40;
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
-
-    const width = maxX - minX;
-    const height = maxY - minY;
-
-    let svg = `<?xml version="1.0" encoding="UTF-8"?>
+  let svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
   <defs>
     <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
@@ -768,106 +807,104 @@ function PetriNetEditor() {
   </defs>
 `;
 
-    // Draw arcs
-    arcs.forEach(arc => {
-      const fromObj = arc.from.type === 'place' 
-        ? places.find(p => p.id === arc.from.id)
-        : transitions.find(t => t.id === arc.from.id);
-      const toObj = arc.to.type === 'place'
-        ? places.find(p => p.id === arc.to.id)
-        : transitions.find(t => t.id === arc.to.id);
+  // Draw arcs
+  arcs.forEach(arc => {
+    // Găsește obiectele sursă și destinație (corectat)
+    const fromObj = places.find(p => p.id === arc.from) || transitions.find(t => t.id === arc.from);
+    const toObj = places.find(p => p.id === arc.to) || transitions.find(t => t.id === arc.to);
 
-      if (fromObj && toObj) {
-        const fromX = fromObj.x;
-        const fromY = fromObj.y;
-        const toX = toObj.x;
-        const toY = toObj.y;
+    if (!fromObj || !toObj) {
+      console.warn(`Arc ${arc.id}: noduri nu găsite (from=${arc.from}, to=${arc.to})`);
+      return;
+    }
 
-        // Build smoothed path that avoids obstacles
-        const pathResult = buildSmoothedPathPetri(
-          fromX, fromY, toX, toY,
-          places, transitions,
-          [arc.from.id, arc.to.id]
-        );
+    // Determină tipurile pentru getRadiusInDirection (corectat)
+    const fromType = places.find(p => p.id === arc.from) ? 'place' : 'transition';
+    const toType = places.find(p => p.id === arc.to) ? 'place' : 'transition';
 
-        // Build with offset for SVG export
-        const placesOffset = places.map(p => ({ ...p, x: p.x - minX, y: p.y - minY }));
-        const transitionsOffset = transitions.map(t => ({ ...t, x: t.x - minX, y: t.y - minY }));
+    const fromX = fromObj.x;
+    const fromY = fromObj.y;
+    const toX = toObj.x;
+    const toY = toObj.y;
 
-        const pathResultOffset = buildSmoothedPathPetri(
-          fromX - minX, fromY - minY,
-          toX - minX, toY - minY,
-          placesOffset, transitionsOffset,
-          [arc.from.id, arc.to.id]
-        );
+    // Construiește path-ul
+    let pathResult = buildSmoothedPathPetri(
+      fromX, fromY, toX, toY,
+      places, transitions,
+      [arc.from, arc.to]
+    );
 
-        const pathD = pathResultOffset.pathD;
-        const controlPoints = pathResultOffset.controlPoints;
+    let pathD = pathResult.pathD;
+    let controlPoints = pathResult.controlPoints;
+    
+    if (arc.controlPoints && arc.controlPoints.length > 0) {
+      const userControlPoints = [{ x: fromX, y: fromY }, ...arc.controlPoints, { x: toX, y: toY }];
+      pathD = pointsToSmoothPath(userControlPoints);
+      controlPoints = userControlPoints;
+    }
 
-        // Calculate arrow direction
-        let dx, dy;
-        if (controlPoints.length >= 2) {
-          const secondLast = controlPoints[controlPoints.length - 2];
-          const lastPt = controlPoints[controlPoints.length - 1];
-          dx = lastPt.x - secondLast.x;
-          dy = lastPt.y - secondLast.y;
-        } else {
-          dx = (toX - minX) - (fromX - minX);
-          dy = (toY - minY) - (fromY - minY);
-        }
+    // Calculează direcția săgeții
+    let dx, dy;
+    if (controlPoints.length >= 2) {
+      const secondLast = controlPoints[controlPoints.length - 2];
+      const lastPt = controlPoints[controlPoints.length - 1];
+      dx = lastPt.x - secondLast.x;
+      dy = lastPt.y - secondLast.y;
+    } else {
+      dx = toX - fromX;
+      dy = toY - fromY;
+    }
+    
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return;
+    const dir = { x: dx / len, y: dy / len };
 
-        const len = Math.hypot(dx, dy);
-        if (len === 0) return;
-        const dir = { x: dx / len, y: dy / len };
+    // Poziționează săgeata pe marginea nodului destinație (corectat)
+    const arrowRadius = getRadiusInDirection(toType, dir, 50, 30, 25);
+    const arrowX = toX - dir.x * arrowRadius;
+    const arrowY = toY - dir.y * arrowRadius;
+    const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
 
-        // Position arrow on the edge of the target node based on its type
-        const arrowRadius = getRadiusInDirection(arc.to.type, dir, 50, 30, 25);
-        const arrowX = (toX - minX) - dir.x * arrowRadius;
-        const arrowY = (toY - minY) - dir.y * arrowRadius;
-        const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
+    svg += `  <path d="${pathD}" stroke="#7c3aed" stroke-width="2.5" fill="none"/>\n`;
+    svg += `  <polygon points="${arrowPoints}" fill="#5b21b6" stroke="#5b21b6" stroke-width="0.5"/>\n`;
+  });
 
-        svg += `  <path d="${pathD}" stroke="#7c3aed" stroke-width="2.5" fill="none"/>\n`;
-        svg += `  <polygon points="${arrowPoints}" fill="#5b21b6" stroke="#5b21b6" stroke-width="0.5"/>\n`;
+  // Draw places (la fel)
+  places.forEach(p => {
+    const x = p.x - minX;
+    const y = p.y - minY;
+    svg += `  <circle cx="${x}" cy="${y}" r="${PLACE_RADIUS}" fill="white" stroke="#5b21b6" stroke-width="2"/>\n`;
+    svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${p.label}</text>\n`;
+    
+    if (p.tokens > 0) {
+      const tokenRadius = TOKEN_RADIUS;
+      for (let i = 0; i < p.tokens; i++) {
+        const angle = (i / p.tokens) * 2 * Math.PI;
+        const tx = x + Math.cos(angle) * 12;
+        const ty = y + Math.sin(angle) * 12;
+        svg += `  <circle cx="${tx}" cy="${ty}" r="${tokenRadius}" fill="#5b21b6" stroke="none"/>\n`;
       }
-    });
+    }
+  });
 
-    // Draw places
-    places.forEach(p => {
-      const x = p.x - minX;
-      const y = p.y - minY;
-      svg += `  <circle cx="${x}" cy="${y}" r="${PLACE_RADIUS}" fill="white" stroke="#5b21b6" stroke-width="2"/>\n`;
-      svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${p.label}</text>\n`;
-      
-      // Draw tokens
-      if (p.tokens > 0) {
-        const tokenRadius = TOKEN_RADIUS;
-        for (let i = 0; i < p.tokens; i++) {
-          const angle = (i / p.tokens) * 2 * Math.PI;
-          const tx = x + Math.cos(angle) * 12;
-          const ty = y + Math.sin(angle) * 12;
-          svg += `  <circle cx="${tx}" cy="${ty}" r="${tokenRadius}" fill="#5b21b6" stroke="none"/>\n`;
-        }
-      }
-    });
+  // Draw transitions (la fel)
+  transitions.forEach(t => {
+    const x = t.x - minX;
+    const y = t.y - minY;
+    svg += `  <rect x="${x - TRANSITION_WIDTH / 2}" y="${y - TRANSITION_HEIGHT / 2}" width="${TRANSITION_WIDTH}" height="${TRANSITION_HEIGHT}" fill="white" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
+    svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${t.label}</text>\n`;
+  });
 
-    // Draw transitions
-    transitions.forEach(t => {
-      const x = t.x - minX;
-      const y = t.y - minY;
-      svg += `  <rect x="${x - TRANSITION_WIDTH / 2}" y="${y - TRANSITION_HEIGHT / 2}" width="${TRANSITION_WIDTH}" height="${TRANSITION_HEIGHT}" fill="white" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
-      svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${t.label}</text>\n`;
-    });
+  svg += '</svg>';
 
-    svg += '</svg>';
-
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${diagramName}.svg`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${diagramName}.svg`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
 
   // ============ RENDERING ============
 

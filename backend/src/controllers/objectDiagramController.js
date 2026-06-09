@@ -28,10 +28,11 @@ exports.saveObjectDiagram = async (req, res) => {
   const client = await pool.connect();
   
   try {
-    const { title, userId, diagram } = req.body;
+    const { title, diagram } = req.body;  // <-- SCOTEM userId de aici
+    const userId = req.user.id;            // <-- ADAUGAT: ia din token
     
-    if (!title || !userId || !diagram) {
-      return res.status(400).json({ error: 'Missing required fields: title, userId, diagram' });
+    if (!title || !diagram) {              // <-- SCHIMBAT: verifică doar title și diagram
+      return res.status(400).json({ error: 'Missing required fields: title, diagram' });
     }
 
     const { elements, connections } = diagram;
@@ -178,6 +179,7 @@ exports.saveObjectDiagram = async (req, res) => {
 exports.getObjectDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
+    const userId = req.user.id;  // <-- ADAUGAT
 
     // Get diagram metadata
     const diagramResult = await pool.query(
@@ -193,6 +195,11 @@ exports.getObjectDiagram = async (req, res) => {
     }
 
     const diagram = diagramResult.rows[0];
+    
+    // <-- ADAUGAT: VERIFICĂ PERMISIUNI
+    if (diagram.id_user !== parseInt(userId)) {
+      return res.status(403).json({ error: 'Access denied. This diagram does not belong to you.' });
+    }
 
     // Get all elements (componente_existente)
     const elementsResult = await pool.query(
@@ -275,6 +282,7 @@ exports.updateObjectDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
     const { diagram } = req.body;
+    const userId = req.user.id;  // <-- ADAUGAT
 
     if (!diagram) {
       return res.status(400).json({ error: 'Missing diagram in request body' });
@@ -284,15 +292,21 @@ exports.updateObjectDiagram = async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Get current diagram to verify it exists and get type info
+    // <-- ADAUGAT: VERIFICĂ DACĂ DIAGRAMA EXISTĂ ȘI APARȚINE USERULUI
     const diagramCheck = await client.query(
-      `SELECT id_tip FROM diagrame WHERE id_diagrama = $1`,
+      `SELECT id_tip, id_user FROM diagrame WHERE id_diagrama = $1`,
       [diagramId]
     );
 
     if (diagramCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Object diagram not found' });
+    }
+    
+    // <-- ADAUGAT: VERIFICĂ PERMISIUNI
+    if (diagramCheck.rows[0].id_user !== parseInt(userId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Access denied. You can only update your own diagrams.' });
     }
 
     const idTip = diagramCheck.rows[0].id_tip;
@@ -407,6 +421,23 @@ exports.updateObjectDiagram = async (req, res) => {
 exports.deleteObjectDiagram = async (req, res) => {
   try {
     const { diagramId } = req.params;
+    const userId = req.user.id;  // <-- ADAUGAT
+
+    // <-- ADAUGAT: VERIFICĂ MAI ÎNTÂI DACĂ DIAGRAMA APARȚINE USERULUI
+    const checkResult = await pool.query(
+      `SELECT id_user FROM diagrame 
+       WHERE id_diagrama = $1 
+       AND id_tip = (SELECT id_tip FROM tipuri_diagrame WHERE nume_tip = 'UML_OBJECT_DIAGRAM')`,
+      [diagramId]
+    );
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Object diagram not found' });
+    }
+    
+    if (checkResult.rows[0].id_user !== parseInt(userId)) {
+      return res.status(403).json({ error: 'Access denied. You can only delete your own diagrams.' });
+    }
 
     const result = await pool.query(
       `DELETE FROM diagrame
@@ -432,7 +463,7 @@ exports.deleteObjectDiagram = async (req, res) => {
  */
 exports.listObjectDiagrams = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user.id;  // <-- SCHIMBAT: ia din token, nu din params
 
     const result = await pool.query(
       `SELECT 

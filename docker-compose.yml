@@ -36,6 +36,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       DB_NAME: ${DB_NAME:-licenta_db}
       PORT: 5005
+      JWT_SECRET: ${JWT_SECRET:-cheia_mea_secreta_super_securizata_12345}
     ports:
       - "${BACKEND_PORT:-5005}:5005"
     depends_on:

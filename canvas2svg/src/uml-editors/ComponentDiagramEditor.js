@@ -698,6 +698,15 @@ export default function ComponentDiagramEditor() {
   const { diagramId } = useParams();
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
+
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
   const [title, setTitle] = useState('Component Diagram');
@@ -719,26 +728,39 @@ export default function ComponentDiagramEditor() {
   const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
 
   const loadDiagram = async (id) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(`/api/class-diagrams/${id}`);
-      const result = await response.json();
-      console.log('Loaded diagram:', result);
-      
-      if (result.diagram?.data) {
-        setTitle(result.diagram.title || 'Component Diagram');
-        setElements(result.diagram.data.elements || []);
-        const loadedConnections = result.diagram.data.connections || [];
-        setConnections(ensureConnectionOffsets(loadedConnections));
-        setCurrentDiagramId(id);
-        sessionStorage.setItem('currentDiagramId', id);
-      }
-    } catch (error) {
-      console.error('Error loading:', error);
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      window.location.href = '/login';
+      return;
     }
-  };
+    
+    const result = await response.json();
+    console.log('Loaded diagram:', result);
+    
+    if (result.diagram?.data) {
+      setTitle(result.diagram.title || 'Component Diagram');
+      setElements(result.diagram.data.elements || []);
+      const loadedConnections = result.diagram.data.connections || [];
+      setConnections(ensureConnectionOffsets(loadedConnections));
+      setCurrentDiagramId(id);
+      sessionStorage.setItem('currentDiagramId', id);
+    }
+  } catch (error) {
+    console.error('Error loading:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
@@ -1147,80 +1169,106 @@ export default function ComponentDiagramEditor() {
   }, [draggingEndpoint, connections, elements, canvasRef]);
 
   const handleSaveToDatabase = async () => {
-    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = activeDiagramId 
-      ? title 
-      : prompt('Enter diagram name:', title || 'Component Diagram');
-    
-    if (!diagramTitle) return;
+  // <-- ADAUGAT: Verifică token-ul
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a salva diagrama!');
+    window.location.href = '/login';
+    return;
+  }
+  
+  const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+  const diagramTitle = activeDiagramId 
+    ? title 
+    : prompt('Enter diagram name:', title || 'Component Diagram');
+  
+  if (!diagramTitle) return;
 
-    try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
-        alert('You must be logged in to save!');
+  try {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      alert('You must be logged in to save!');
+      window.location.href = '/login';
+      return;
+    }
+
+    const connectionsToSave = ensureConnectionOffsets(connections);
+
+    const diagramData = {
+      diagram: {
+        selectedType: 'COMPONENT',
+        elements: elements,
+        connections: connectionsToSave
+      }
+    };
+
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    let response, result;
+
+    if (activeDiagramId) {
+      // UPDATE existing diagram
+      response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(diagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        window.location.href = '/login';
         return;
       }
-
-      const connectionsToSave = ensureConnectionOffsets(connections);
-
-      const diagramData = {
-        diagram: {
-          selectedType: 'COMPONENT',
-          elements: elements,
-          connections: connectionsToSave
-        }
-      };
-
-      let response, result, method, url;
       
-      if (activeDiagramId) {
-        // UPDATE existing diagram
-        method = 'PUT';
-        url = `/api/class-diagrams/${activeDiagramId}`;
-        response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(diagramData)
-        });
-        result = await response.json();
-        
-        if (response.ok) {
-          alert(`Diagram "${diagramTitle}" updated successfully!`);
-          setTitle(diagramTitle);
-        }
-      } else {
-        // CREATE new diagram
-        method = 'POST';
-        url = '/api/class-diagrams';
-        const newDiagramData = {
-          title: diagramTitle,
-          userId: parseInt(userId),
-          ...diagramData
-        };
-        
-        response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newDiagramData)
-        });
-        result = await response.json();
-        
-        if (response.ok) {
-          alert(`Diagram "${diagramTitle}" saved successfully! ID: ${result.diagramId}`);
-          setCurrentDiagramId(result.diagramId);
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-          setTitle(diagramTitle);
-        }
+      result = await response.json();
+      
+      if (response.ok) {
+        alert(`Diagram "${diagramTitle}" updated successfully!`);
+        setTitle(diagramTitle);
       }
-
-      if (!response.ok) {
-        alert(`Error: ${result.error}`);
+    } else {
+      // CREATE new diagram
+      const newDiagramData = {
+        title: diagramTitle,
+        userId: parseInt(userId),
+        ...diagramData
+      };
+      
+      response = await fetch(`${apiUrl}/class-diagrams`, {
+        method: 'POST',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(newDiagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        window.location.href = '/login';
+        return;
       }
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      alert(`Save error: ${error.message}`);
+      
+      result = await response.json();
+      
+      if (response.ok) {
+        alert(`Diagram "${diagramTitle}" saved successfully! ID: ${result.diagramId}`);
+        setCurrentDiagramId(result.diagramId);
+        sessionStorage.setItem('currentDiagramId', result.diagramId);
+        setTitle(diagramTitle);
+      }
     }
-  };
+
+    if (!response.ok) {
+      alert(`Error: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error saving to database:', error);
+    alert(`Save error: ${error.message}`);
+  }
+};
 
   const handleExportSVG = () => {
     const svg = generateFullSVG(elements, connections, title);
@@ -1250,34 +1298,42 @@ export default function ComponentDiagramEditor() {
   };
 
   useEffect(() => {
-    const handleImportFile = async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      try {
-        const content = await file.text();
-        const data = JSON.parse(content);
-        if (data.elements && data.connections) {
-          setElements(data.elements);
-          setConnections(ensureConnectionOffsets(data.connections));
-          setTitle(data.title || 'Imported Diagram');
-          setCurrentDiagramId(null);
-          sessionStorage.removeItem('currentDiagramId');
-          setSelectedElement(null);
-          setSelectedConnection(null);
-          alert('✅ Diagram imported successfully!');
-        }
-      } catch (error) {
-        alert('Error importing file');
-      }
-    };
-
-    const input = fileInputRef.current;
-    if (input) {
-      input.addEventListener('change', handleImportFile);
-      return () => input.removeEventListener('change', handleImportFile);
+    // <-- Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+      window.location.href = '/login';
+      return;
     }
-  }, []);
+
+    try {
+      const content = await file.text();
+      const data = JSON.parse(content);
+      if (data.elements && data.connections) {
+        setElements(data.elements);
+        setConnections(ensureConnectionOffsets(data.connections));
+        setTitle(data.title || 'Imported Diagram');
+        setCurrentDiagramId(null);
+        sessionStorage.removeItem('currentDiagramId');
+        setSelectedElement(null);
+        setSelectedConnection(null);
+        alert('✅ Diagram imported successfully!');
+      }
+    } catch (error) {
+      alert('Error importing file');
+    }
+  };
+
+  const input = fileInputRef.current;
+  if (input) {
+    input.addEventListener('change', handleImportFile);
+    return () => input.removeEventListener('change', handleImportFile);
+  }
+}, []);
 
   return (
     <div className="uml-editor" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>

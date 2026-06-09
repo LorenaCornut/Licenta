@@ -5,6 +5,15 @@ import './Settings.css';
 function Settings() {
   const navigate = useNavigate();
   const userId = localStorage.getItem('userId');
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -29,105 +38,138 @@ function Settings() {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
-    if (!userId) {
+  const token = localStorage.getItem('token'); // <-- ADAUGAT
+  
+  if (!userId || !token) { // <-- SCHIMBAT
+    navigate('/login');
+    return;
+  }
+  fetchUserData();
+}, [userId, navigate]);
+
+  const fetchUserData = async () => {
+  try {
+    // <-- SCHIMBAT: Folosește ruta nouă fără userId și adaugă headers
+    const response = await fetch('/api/auth/profile', {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      // Token invalid
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
       navigate('/login');
       return;
     }
-    fetchUserData();
-  }, [userId, navigate]);
-
-  const fetchUserData = async () => {
-    try {
-      const response = await fetch(`/api/auth/profile/${userId}`);
-      if (!response.ok) {
-        throw new Error('Nu s-au putut încărca datele');
-      }
-      const data = await response.json();
-      setUserData({
-        username: data.username,
-        email: data.email,
-        created_at: data.created_at,
-        profile_picture: data.profile_picture || ''
-      });
-      setNewEmail(data.email);
-      setLoading(false);
-    } catch (err) {
-      setError('Eroare la încărcarea profilului');
-      setLoading(false);
+    
+    if (!response.ok) {
+      throw new Error('Nu s-au putut încărca datele');
     }
-  };
+    const data = await response.json();
+    setUserData({
+      username: data.username,
+      email: data.email,
+      created_at: data.created_at,
+      profile_picture: data.profile_picture || ''
+    });
+    setNewEmail(data.email);
+    setLoading(false);
+  } catch (err) {
+    setError('Eroare la încărcarea profilului');
+    setLoading(false);
+  }
+};
 
   const handleUpdateEmail = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
+  e.preventDefault();
+  setError('');
+  setSuccess('');
+  
+  if (!newEmail || !newEmail.includes('@')) {
+    setError('Vă rugăm introduceți un email valid');
+    return;
+  }
+  
+  try {
+    // <-- SCHIMBAT: Folosește ruta nouă fără userId și adaugă headers
+    const response = await fetch('/api/auth/profile/email', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ email: newEmail })
+    });
     
-    if (!newEmail || !newEmail.includes('@')) {
-      setError('Vă rugăm introduceți un email valid');
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
       return;
     }
     
-    try {
-      const response = await fetch(`/api/auth/profile/${userId}/email`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: newEmail })
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || 'Eroare la actualizare');
-      }
-      
-      setUserData(prev => ({ ...prev, email: newEmail }));
-      setEditingEmail(false);
-      setSuccess('Email actualizat cu succes!');
-    } catch (err) {
-      setError(err.message);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.message || 'Eroare la actualizare');
     }
-  };
+    
+    setUserData(prev => ({ ...prev, email: newEmail }));
+    setEditingEmail(false);
+    setSuccess('Email actualizat cu succes!');
+  } catch (err) {
+    setError(err.message);
+  }
+};
 
   const handleUpdatePassword = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
+  e.preventDefault();
+  setError('');
+  setSuccess('');
+  
+  if (newPassword !== confirmPassword) {
+    setError('Parolele nu coincid');
+    return;
+  }
+  
+  if (newPassword.length < 6) {
+    setError('Parola trebuie să aibă cel puțin 6 caractere');
+    return;
+  }
+  
+  try {
+    // <-- SCHIMBAT: Folosește ruta nouă fără userId și adaugă headers
+    const response = await fetch('/api/auth/profile/password', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ 
+        currentPassword, 
+        newPassword 
+      })
+    });
     
-    if (newPassword !== confirmPassword) {
-      setError('Parolele nu coincid');
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
       return;
     }
     
-    if (newPassword.length < 6) {
-      setError('Parola trebuie să aibă cel puțin 6 caractere');
-      return;
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.message || 'Eroare la actualizare');
     }
     
-    try {
-      const response = await fetch(`/api/auth/profile/${userId}/password`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          currentPassword, 
-          newPassword 
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || 'Eroare la actualizare');
-      }
-      
-      setEditingPassword(false);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setSuccess('Parola actualizată cu succes!');
-    } catch (err) {
-      setError(err.message);
-    }
-  };
+    setEditingPassword(false);
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setSuccess('Parola actualizată cu succes!');
+  } catch (err) {
+    setError(err.message);
+  }
+};
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -140,45 +182,51 @@ function Settings() {
   };
 
   const handleProfilePictureChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const file = e.target.files[0];
+  if (!file) return;
 
-    // Verifică dimensiunea (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Imaginea trebuie să fie mai mică de 2MB');
-      return;
-    }
+  if (file.size > 2 * 1024 * 1024) {
+    setError('Imaginea trebuie să fie mai mică de 2MB');
+    return;
+  }
 
-    // Verifică tipul
-    if (!file.type.startsWith('image/')) {
-      setError('Vă rugăm selectați o imagine');
-      return;
-    }
+  if (!file.type.startsWith('image/')) {
+    setError('Vă rugăm selectați o imagine');
+    return;
+  }
 
-    // Convert to base64
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result;
-      try {
-        const response = await fetch(`/api/auth/profile/${userId}/picture`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profilePicture: base64 })
-        });
+  const reader = new FileReader();
+  reader.onloadend = async () => {
+    const base64 = reader.result;
+    try {
+      // <-- SCHIMBAT: Folosește ruta nouă fără userId și adaugă headers
+      const response = await fetch('/api/auth/profile/picture', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ profilePicture: base64 })
+      });
 
-        if (!response.ok) {
-          throw new Error('Eroare la salvare');
-        }
-
-        setUserData(prev => ({ ...prev, profile_picture: base64 }));
-        setSuccess('Poza de profil actualizată!');
-        setError('');
-      } catch (err) {
-        setError('Eroare la actualizarea pozei de profil');
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        navigate('/login');
+        return;
       }
-    };
-    reader.readAsDataURL(file);
+
+      if (!response.ok) {
+        throw new Error('Eroare la salvare');
+      }
+
+      setUserData(prev => ({ ...prev, profile_picture: base64 }));
+      setSuccess('Poza de profil actualizată!');
+      setError('');
+    } catch (err) {
+      setError('Eroare la actualizarea pozei de profil');
+    }
   };
+  reader.readAsDataURL(file);
+};
 
   if (loading) {
     return (

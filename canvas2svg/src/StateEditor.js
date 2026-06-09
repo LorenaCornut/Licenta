@@ -189,6 +189,14 @@ const StateEditor = () => {
   const { diagramId } = useParams();
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
   
   const [selectedType, setSelectedType] = useState('STATE');
   const [elements, setElements] = useState([]);
@@ -249,41 +257,50 @@ const StateEditor = () => {
 
   // Load diagram from backend
   const loadDiagram = async (id) => {
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      const response = await fetch(`${apiUrl}/diagrams/${id}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to load diagram: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      console.log('Loaded diagram:', data);
-      
-      // Set diagram title and ID
-      setCurrentDiagramId(id);
-      if (data.diagram?.title) {
-        setDiagramTitle(data.diagram.title);
-      }
-      
-      // Load elements and connections from backend response
-      if (data.elements && Array.isArray(data.elements)) {
-        console.log('Setting elements:', data.elements);
-        setElements(data.elements);
-        setSavedElementsState(JSON.stringify(data.elements));
-      }
-      
-      if (data.connections && Array.isArray(data.connections)) {
-        console.log('Setting connections:', data.connections);
-        setConnections(data.connections);
-        setSavedConnectionsState(JSON.stringify(data.connections));
-      }
-    } catch (error) {
-      console.error('Error loading diagram:', error);
-      alert('Eroare la încărcarea diagramei: ' + error.message);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
+      return;
     }
-  };
+    
+    if (!response.ok) {
+      throw new Error(`Failed to load diagram: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    console.log('Loaded diagram:', data);
+    
+    setCurrentDiagramId(id);
+    if (data.diagram?.title) {
+      setDiagramTitle(data.diagram.title);
+    }
+    
+    if (data.elements && Array.isArray(data.elements)) {
+      console.log('Setting elements:', data.elements);
+      setElements(data.elements);
+      setSavedElementsState(JSON.stringify(data.elements));
+    }
+    
+    if (data.connections && Array.isArray(data.connections)) {
+      console.log('Setting connections:', data.connections);
+      setConnections(data.connections);
+      setSavedConnectionsState(JSON.stringify(data.connections));
+    }
+  } catch (error) {
+    console.error('Error loading diagram:', error);
+    alert('Eroare la încărcarea diagramei: ' + error.message);
+  }
+};
 
   // Check if there are unsaved changes
   const hasUnsavedChanges = () => {
@@ -293,104 +310,113 @@ const StateEditor = () => {
 
   // Save diagram - show modal first
   const handleSave = () => {
-    const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
-      alert('Trebuie să te autentifici din nou pentru a salva diagrama!');
-      return;
-    }
-    
-    if (elements.length === 0) {
-      alert('Nu ai niciuna stare în diagramă. Adaugă cel puțin o stare înainte de a salva!');
-      return;
-    }
-    
-    setShowSaveModal(true);
-    setSaveError("");
-  };
+  const userId = localStorage.getItem('userId');
+  const token = localStorage.getItem('token'); // <-- ADAUGAT verificare token
+  
+  if (!userId || userId === 'null' || userId === 'undefined' || !token) { // <-- SCHIMBAT
+    alert('Trebuie să te autentifici din nou pentru a salva diagrama!');
+    navigate('/login'); // <-- ADAUGAT redirect
+    return;
+  }
+  
+  if (elements.length === 0) {
+    alert('Nu ai niciuna stare în diagramă. Adaugă cel puțin o stare înainte de a salva!');
+    return;
+  }
+  
+  setShowSaveModal(true);
+  setSaveError("");
+};
 
   // Confirm save - actually save to database
   const confirmSave = async () => {
-    if (!diagramTitle.trim()) {
-      setSaveError('Te rog introdu un nume pentru diagramă!');
-      return;
-    }
+  if (!diagramTitle.trim()) {
+    setSaveError('Te rog introdu un nume pentru diagramă!');
+    return;
+  }
 
-    const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
+  const userId = localStorage.getItem('userId');
+  if (!userId || userId === 'null' || userId === 'undefined') {
+    setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+    return;
+  }
+
+  setIsSaving(true);
+  setSaveError("");
+
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+
+    const diagramData = {
+      elements: elements,
+      connections: connections
+    };
+
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/diagrams/save`, {
+      method: 'POST',
+      headers: getAuthHeaders(), // <-- SCHIMBAT
+      body: JSON.stringify({
+        userId: parseInt(userId),
+        title: diagramTitle.trim(),
+        tipDiagrama: 'AUTOMAT',
+        nodes: elements.map(el => ({
+          id: el.id,
+          label: el.name || '',
+          x: el.x || 0,
+          y: el.y || 0,
+          type: el.type
+        })),
+        edges: connections.map(conn => ({
+          from: conn.fromId,
+          to: conn.toId,
+          label: conn.label || ''
+        })),
+        diagramData: diagramData,
+        diagramId: currentDiagramId
+      })
+    });
+
+    if (response.status === 401) {
       setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      setIsSaving(false);
+      setTimeout(() => navigate('/login'), 1500);
       return;
     }
 
-    setIsSaving(true);
-    setSaveError("");
+    const data = await response.json();
 
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-
-      // Transform to exact same structure as JSON export
-      const diagramData = {
-        elements: elements,
-        connections: connections
-      };
-
-      const response = await fetch(`${apiUrl}/diagrams/save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: parseInt(userId),
-          title: diagramTitle.trim(),
-          tipDiagrama: 'AUTOMAT',
-          nodes: elements.map(el => ({
-            id: el.id,
-            label: el.name || '',
-            x: el.x || 0,
-            y: el.y || 0,
-            type: el.type
-          })),
-          edges: connections.map(conn => ({
-            from: conn.fromId,
-            to: conn.toId,
-            label: conn.label || ''
-          })),
-          diagramData: diagramData,
-          diagramId: currentDiagramId
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setSaveError(data.message || 'Eroare la salvarea diagramei!');
-        setIsSaving(false);
-        return;
-      }
-
-      // Success!
-      setShowSaveModal(false);
+    if (!response.ok) {
+      setSaveError(data.message || 'Eroare la salvarea diagramei!');
       setIsSaving(false);
-      // Update ID if it's a new diagram
-      if (data.diagramId && !currentDiagramId) {
-        setCurrentDiagramId(data.diagramId);
-      }
-      // Update saved state
-      setSavedElementsState(JSON.stringify(elements));
-      setSavedConnectionsState(JSON.stringify(connections));
-      
-      // Show success toast
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 5000);
-      
-      // If user pressed Back and then Save, navigate to dashboard
-      if (shouldExitAfterSave) {
-        setShouldExitAfterSave(false);
-        setTimeout(() => navigate('/dashboard'), 1500);
-      }
-
-    } catch (err) {
-      setSaveError('Eroare de rețea sau server!');
-      setIsSaving(false);
+      return;
     }
-  };
+
+    // Success!
+    setShowSaveModal(false);
+    setIsSaving(false);
+    if (data.diagramId && !currentDiagramId) {
+      setCurrentDiagramId(data.diagramId);
+    }
+    setSavedElementsState(JSON.stringify(elements));
+    setSavedConnectionsState(JSON.stringify(connections));
+    
+    setShowSuccessToast(true);
+    setTimeout(() => setShowSuccessToast(false), 5000);
+    
+    if (shouldExitAfterSave) {
+      setShouldExitAfterSave(false);
+      setTimeout(() => navigate('/dashboard'), 1500);
+    }
+
+  } catch (err) {
+    setSaveError('Eroare de rețea sau server!');
+    setIsSaving(false);
+  }
+};
 
   // Export as JSON
   const exportJSON = () => {
@@ -412,20 +438,29 @@ const StateEditor = () => {
 
   // Handle import
   const handleImport = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (data.elements && Array.isArray(data.elements)) setElements(data.elements);
-        if (data.connections && Array.isArray(data.connections)) setConnections(data.connections);
-      } catch (err) {
-        alert('Fișier invalid!');
-      }
-    };
-    reader.readAsText(file);
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  // <-- Verifică opțional dacă e autentificat
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Te rugăm să te autentifici înainte de a importa!');
+    navigate('/login');
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.elements && Array.isArray(data.elements)) setElements(data.elements);
+      if (data.connections && Array.isArray(data.connections)) setConnections(data.connections);
+    } catch (err) {
+      alert('Fișier invalid!');
+    }
   };
+  reader.readAsText(file);
+};
 
   // Download as SVG
   const downloadSVG = () => {

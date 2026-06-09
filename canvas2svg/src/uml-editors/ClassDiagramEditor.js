@@ -420,6 +420,14 @@ function ClassDiagramEditor() {
     }
   const { diagramId } = useParams();
   const navigate = useNavigate();
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
   
   // CLASS diagram elements - EXACTLY like UMLEditor
   const CLASS_ELEMENTS = {
@@ -490,27 +498,40 @@ function ClassDiagramEditor() {
   }, [elements, selectedElement]);
 
   const loadDiagram = async (id) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(`http://localhost:5005/api/class-diagrams/${id}`);
-      const result = await response.json();
-      if (result.diagram?.data) {
-        setTitle(result.diagram.title || 'Untitled Diagram');
-        setElements(result.diagram.data.elements || []);
-        setConnections(result.diagram.data.connections || []);
-        setCurrentDiagramId(id);
-        sessionStorage.setItem('currentDiagramId', id);
-      } else {
-        console.error('Invalid response format:', result);
-        alert('Eroare: Format de răspuns invalid din server');
-      }
-    } catch (err) {
-      console.error('Error loading diagram:', err);
-      alert(`Eroare la încărcarea diagramei: ${err.message}`);
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- SCHIMBAT URL și adăugat headers
+    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
+      return;
     }
-  };
+    
+    const result = await response.json();
+    if (result.diagram?.data) {
+      setTitle(result.diagram.title || 'Untitled Diagram');
+      setElements(result.diagram.data.elements || []);
+      setConnections(result.diagram.data.connections || []);
+      setCurrentDiagramId(id);
+      sessionStorage.setItem('currentDiagramId', id);
+    } else {
+      console.error('Invalid response format:', result);
+      alert('Eroare: Format de răspuns invalid din server');
+    }
+  } catch (err) {
+    console.error('Error loading diagram:', err);
+    alert(`Eroare la încărcarea diagramei: ${err.message}`);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleAddAttribute = (e, elementId) => {
     e.stopPropagation();
@@ -1084,77 +1105,102 @@ function ClassDiagramEditor() {
 
   // Save or Update Diagram - Auto-detects based on currentDiagramId
   const handleSaveToDatabase = async () => {
-    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = activeDiagramId
-      ? title
-      : prompt('Introdu numele diagramei:', title || 'UML Class Diagram');
+  // <-- ADAUGAT: Verifică token-ul
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a salva diagrama!');
+    navigate('/login');
+    return;
+  }
+  
+  const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+  const diagramTitle = activeDiagramId
+    ? title
+    : prompt('Introdu numele diagramei:', title || 'UML Class Diagram');
 
-    if (!diagramTitle) return;
+  if (!diagramTitle) return;
 
-    try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
-        alert('Trebuie să fii logat pentru a salva diagrama!');
+  try {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      alert('Trebuie să fii logat pentru a salva diagrama!');
+      navigate('/login');
+      return;
+    }
+
+    const diagramData = {
+      selectedType: 'CLASS',
+      elements: elements,
+      connections: prepareDiagramForSave()
+    };
+
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    let response, result;
+
+    if (activeDiagramId) {
+      // UPDATE existing diagram
+      response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify({ diagram: diagramData })
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        navigate('/login');
         return;
       }
+      
+      result = await response.json();
 
-      // Pregătește datele diagramei cu conexiuni și waypoints-uri
-      const diagramData = {
-        selectedType: 'CLASS',
-        elements: elements,
-        connections: prepareDiagramForSave()
+      if (response.ok) {
+        alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+        setTitle(diagramTitle);
+      }
+    } else {
+      // CREATE new diagram
+      const newDiagramData = {
+        title: diagramTitle,
+        userId: parseInt(userId),
+        diagram: diagramData
       };
 
-      let response, result, method, url;
-
-      if (activeDiagramId) {
-        // UPDATE existing diagram
-        method = 'PUT';
-        url = `http://localhost:5005/api/class-diagrams/${activeDiagramId}`;
-        response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ diagram: diagramData })
-        });
-        result = await response.json();
-
-        if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
-          setTitle(diagramTitle);
-        }
-      } else {
-        // CREATE new diagram
-        method = 'POST';
-        url = 'http://localhost:5005/api/class-diagrams';
-        const newDiagramData = {
-          title: diagramTitle,
-          userId: parseInt(userId),
-          diagram: diagramData
-        };
-
-        response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newDiagramData)
-        });
-        result = await response.json();
-
-        if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-          setCurrentDiagramId(result.diagramId);
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-          setTitle(diagramTitle);
-        }
+      response = await fetch(`${apiUrl}/class-diagrams`, {
+        method: 'POST',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(newDiagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        navigate('/login');
+        return;
       }
+      
+      result = await response.json();
 
-      if (!response.ok) {
-        alert(`Eroare: ${result.error}`);
+      if (response.ok) {
+        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+        setCurrentDiagramId(result.diagramId);
+        sessionStorage.setItem('currentDiagramId', result.diagramId);
+        setTitle(diagramTitle);
       }
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      alert(`Eroare la salvare: ${error.message}`);
     }
-  };
+
+    if (!response.ok) {
+      alert(`Eroare: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error saving to database:', error);
+    alert(`Eroare la salvare: ${error.message}`);
+  }
+};
 
 
 
@@ -1330,6 +1376,13 @@ function ClassDiagramEditor() {
   const handleImport = (event) => {
     const file = event.target.files[0];
     if (!file) return;
+
+    const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+    navigate('/login');
+    return;
+  }
     
     // Extract filename without extension for title
     const fileName = file.name.replace(/\.json$/i, '');

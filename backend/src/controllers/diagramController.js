@@ -8,7 +8,9 @@ exports.saveStateDiagram = async (req, res) => {
 
 // Salvează o diagramă nouă sau actualizează una existentă (Grafuri + State Diagrams)
 exports.saveDiagram = async (req, res) => {
-  let { userId, title, tipDiagrama, nodes, edges, elements, connections, diagramData, diagramId } = req.body;
+  // NU MAI LUA userId DIN BODY
+  let { title, tipDiagrama, nodes, edges, elements, connections, diagramData, diagramId } = req.body;
+  const userId = req.user.id; // <-- ADAUGAT: ia din token
 
   try {
     // Normalize diagram type names
@@ -20,9 +22,11 @@ exports.saveDiagram = async (req, res) => {
       tipDiagrama = 'AUTOMAT';
     }
     
-    if (!userId || !title) {
-      return res.status(400).json({ message: 'Lipsa userId sau title!' });
+    // VERIFICĂ DACĂ USERID EXISTĂ (acum vine din token)
+    if (!userId || !title) {  // <-- SCHIMBAT: verifică doar title, userId vine sigur din middleware
+      return res.status(400).json({ message: 'Lipsa titlu!' });
     }
+
 
     // Extrage elements și connections din diagramData dacă sunt acolo (frontend state diagrams)
     if (diagramData) {
@@ -232,7 +236,7 @@ exports.saveDiagram = async (req, res) => {
 
 // Obține toate diagramele unui utilizator
 exports.getUserDiagrams = async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id; // <-- SCHIMBAT: ia din token, nu din req.params
 
   try {
     const result = await pool.query(
@@ -252,8 +256,10 @@ exports.getUserDiagrams = async (req, res) => {
 };
 
 // Încarcă o diagramă specifică
+// Încarcă o diagramă specifică
 exports.loadDiagram = async (req, res) => {
   const { diagramId } = req.params;
+  const userId = req.user.id;
 
   try {
     // Obține informațiile despre diagramă
@@ -269,6 +275,11 @@ exports.loadDiagram = async (req, res) => {
     }
 
     const diagram = diagramResult.rows[0];
+    
+    // Verifică permisiuni
+    if (diagram.id_user !== parseInt(userId)) {
+      return res.status(403).json({ message: 'Nu aveți permisiunea să accesați această diagramă' });
+    }
 
     // Obține componentele (nodurile/stările)
     const componentsResult = await pool.query(
@@ -294,11 +305,13 @@ exports.loadDiagram = async (req, res) => {
 
     for (const component of componentsResult.rows) {
       const continut = typeof component.continut === 'string' ? JSON.parse(component.continut) : component.continut;
+      
+      // Construiește elementul - păstrează toate proprietățile originale
       const element = {
         id: continut.originalId || `node-${component.id_instanta}`,
         name: continut.label || '',
         label: continut.label || '',
-        type: continut.type || 'STATE',
+        type: continut.type || 'NODE',  // Pentru Deployment: NODE, ARTIFACT, etc.
         stereotype: continut.stereotype || '',
         color: continut.color || '#60a5fa',
         entryAction: continut.entryAction || '',
@@ -307,7 +320,9 @@ exports.loadDiagram = async (req, res) => {
         y: component.y,
         width: component.weight,
         height: component.height,
-        db_id: component.id_instanta
+        db_id: component.id_instanta,
+        // Adaugă și alte proprietăți specifice
+        tokens: continut.tokens
       };
       nodeMap[component.id_instanta] = element;
       elements.push(element);
@@ -329,49 +344,45 @@ exports.loadDiagram = async (req, res) => {
           id: `conn-${connection.id_instanta}`,
           fromId: startNode.id,
           toId: endNode.id,
-          label: text.label || 'ε',
-          type: text.type || 'TRANSITION'  // Restore saved connection type
+          label: text.label || '',
+          type: text.type || 'COMMUNICATION_PATH'
         };
         
-        // Restore loopDirection if it was saved
-        if (text.loopDirection) {
-          connData.loopDirection = text.loopDirection;
-        }
-        
-        // Restore fromPoint and toPoint if they were saved (for UML diagram routing)
-        if (text.fromPoint) {
-          connData.fromPoint = text.fromPoint;
-        }
-        if (text.toPoint) {
-          connData.toPoint = text.toPoint;
-        }
-        
-        // Restore edge/offset information if it was saved (new format)
-        if (text.fromEdge) {
-          connData.fromEdge = text.fromEdge;
-          connData.fromOffset = text.fromOffset !== undefined ? text.fromOffset : 0.5;
-        }
-        if (text.toEdge) {
-          connData.toEdge = text.toEdge;
-          connData.toOffset = text.toOffset !== undefined ? text.toOffset : 0.5;
-        }
-        
-        // Restore routing points (controlPoints) if they were saved
-        if (routingPoints && routingPoints.length > 0) {
-          connData.controlPoints = routingPoints;
-        }
+        // Restore all routing information
+        if (text.loopDirection) connData.loopDirection = text.loopDirection;
+        if (text.fromPoint) connData.fromPoint = text.fromPoint;
+        if (text.toPoint) connData.toPoint = text.toPoint;
+        if (text.fromEdge) connData.fromEdge = text.fromEdge;
+        if (text.fromOffset !== undefined) connData.fromOffset = text.fromOffset;
+        if (text.toEdge) connData.toEdge = text.toEdge;
+        if (text.toOffset !== undefined) connData.toOffset = text.toOffset;
+        if (routingPoints && routingPoints.length > 0) connData.controlPoints = routingPoints;
         
         connections.push(connData);
       }
     }
 
-    // Returnează în formatul așteptat de frontend
-    // Pentru state diagrams: elements și connections
-    // Pentru graphs: nodes și edges (cu format compatibil)
-    const isGraphDiagram = diagram.nume_tip === 'Graf orientat' || diagram.nume_tip === 'Graf neorientat';
+    // Determină tipul diagramei
+    const diagramType = diagram.nume_tip;
+    const isGraphDiagram = diagramType === 'Graf orientat' || diagramType === 'Graf neorientat';
+    const isStateDiagram = diagramType === 'AUTOMAT' || diagramType === 'STATE_MACHINE_DIAGRAM';
+    const isDeploymentDiagram = diagramType === 'UML_DEPLOYMENT_DIAGRAM';
     
-    if (isGraphDiagram) {
-      // Convertește elements/connections înapoi în nodes/edges pentru graph editors
+    // Pentru diagramele UML Deployment, returnează elements și connections
+    if (isDeploymentDiagram || isStateDiagram) {
+      return res.status(200).json({
+        diagram: {
+          id: diagram.id_diagrama,
+          title: diagram.titlu,
+          type: diagram.nume_tip,
+          createdAt: diagram.data_create,
+          updatedAt: diagram.data_update
+        },
+        elements: elements,
+        connections: connections
+      });
+    } else if (isGraphDiagram) {
+      // Pentru grafuri, convertește la nodes/edges
       const nodes = elements.map(el => ({
         id: el.id,
         label: el.name,
@@ -381,19 +392,11 @@ exports.loadDiagram = async (req, res) => {
         height: el.height
       }));
       
-      const edges = connections.map(conn => {
-        const edge = {
-          from: conn.fromId,
-          to: conn.toId
-        };
-        // Re-add controlPoints if they exist
-        if (conn.controlPoints && conn.controlPoints.length > 0) {
-          edge.controlPoints = conn.controlPoints;
-        }
-        return edge;
-      });
-      
-      console.log(`Loaded diagram ${diagramId}: ${nodes.length} nodes, ${edges.length} edges`);
+      const edges = connections.map(conn => ({
+        from: conn.fromId,
+        to: conn.toId,
+        ...(conn.controlPoints && conn.controlPoints.length > 0 ? { controlPoints: conn.controlPoints } : {})
+      }));
       
       return res.status(200).json({
         diagram: {
@@ -407,7 +410,7 @@ exports.loadDiagram = async (req, res) => {
         edges: edges
       });
     } else {
-      // Pentru state diagrams, return elements și connections (original format)
+      // Pentru orice alt tip, returnează formatul standard
       return res.status(200).json({
         diagram: {
           id: diagram.id_diagrama,
@@ -430,9 +433,26 @@ exports.loadDiagram = async (req, res) => {
 // Șterge o diagramă
 exports.deleteDiagram = async (req, res) => {
   const { diagramId } = req.params;
+  const userId = req.user.id; // <-- ADAUGAT
 
   try {
+    // <-- ADAUGAT: VERIFICĂ MAI ÎNTÂI DACĂ DIAGRAMA APARȚINE USERULUI
+    const checkResult = await pool.query(
+      'SELECT id_user FROM diagrame WHERE id_diagrama = $1',
+      [diagramId]
+    );
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Diagrama nu a fost găsită' });
+    }
+    
+    if (checkResult.rows[0].id_user !== parseInt(userId)) {
+      return res.status(403).json({ message: 'Nu aveți permisiunea să ștergeți această diagramă' });
+    }
+    
+    // Șterge diagrama (acum știm sigur că aparține userului)
     await pool.query('DELETE FROM diagrame WHERE id_diagrama = $1', [diagramId]);
+    
     return res.status(200).json({ message: 'Diagrama a fost ștearsă' });
   } catch (err) {
     console.error('Eroare la ștergerea diagramei:', err);

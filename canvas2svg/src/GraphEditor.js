@@ -341,6 +341,14 @@ function GraphEditor() {
   // --- DECLARĂ TOATE STATE-URILE LA ÎNCEPUT ---
   const { diagramId } = useParams(); // ID-ul diagramei din URL (dacă există)
   const navigate = useNavigate();
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
   
   const [nodes, setNodes] = useState([]); // {id, x, y, label}
   const [edges, setEdges] = useState([]); // {from, to}
@@ -372,131 +380,152 @@ function GraphEditor() {
 
   // Funcție pentru a încărca o diagramă din baza de date
   async function loadDiagram(id) {
-    setIsLoading(true);
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      const response = await fetch(`${apiUrl}/diagrams/${id}`);
-      const data = await response.json();
-
-      if (response.ok) {
-        setNodes(data.nodes || []);
-        setEdges(data.edges || []);
-        setDiagramTitle(data.diagram?.title || '');
-        setCurrentDiagramId(id);
-        
-        // Actualizează și textarea-urile
-        const nodeLabels = (data.nodes || []).map(n => n.label).filter(Boolean);
-        setAssistantNodes(nodeLabels.join('\n'));
-        
-        const edgeLabels = (data.edges || []).map(e => {
-          const fromNode = (data.nodes || []).find(n => n.id === e.from);
-          const toNode = (data.nodes || []).find(n => n.id === e.to);
-          if (fromNode?.label && toNode?.label) {
-            return `${fromNode.label} ${toNode.label}`;
-          }
-          return null;
-        }).filter(Boolean);
-        setAssistantEdges(edgeLabels.join('\n'));
-      } else {
-        alert(data.message || 'Eroare la încărcarea diagramei!');
-      }
-    } catch (err) {
-      alert('Eroare de rețea sau server!');
+  setIsLoading(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- ADAUGAT headers cu token
+    const response = await fetch(`${apiUrl}/diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      // Token invalid
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
+      return;
     }
-    setIsLoading(false);
+    
+    const data = await response.json();
+
+    if (response.ok) {
+      setNodes(data.nodes || []);
+      setEdges(data.edges || []);
+      setDiagramTitle(data.diagram?.title || '');
+      setCurrentDiagramId(id);
+      
+      // Actualizează și textarea-urile
+      const nodeLabels = (data.nodes || []).map(n => n.label).filter(Boolean);
+      setAssistantNodes(nodeLabels.join('\n'));
+      
+      const edgeLabels = (data.edges || []).map(e => {
+        const fromNode = (data.nodes || []).find(n => n.id === e.from);
+        const toNode = (data.nodes || []).find(n => n.id === e.to);
+        if (fromNode?.label && toNode?.label) {
+          return `${fromNode.label} ${toNode.label}`;
+        }
+        return null;
+      }).filter(Boolean);
+      setAssistantEdges(edgeLabels.join('\n'));
+    } else {
+      alert(data.message || 'Eroare la încărcarea diagramei!');
+    }
+  } catch (err) {
+    alert('Eroare de rețea sau server!');
   }
+  setIsLoading(false);
+}
 
   // Funcție pentru salvarea diagramei în baza de date
   async function handleSave() {
-    const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
-      alert('Trebuie să te autentifici din nou pentru a salva diagrama! Te rog deloghează-te și loghează-te din nou.');
-      return;
-    }
-    
-    if (nodes.length === 0) {
-      alert('Nu ai niciun nod în diagramă. Adaugă cel puțin un nod înainte de a salva!');
-      return;
-    }
-    
-    // Afișează modalul pentru introducerea numelui
-    setShowSaveModal(true);
-    setSaveError("");
+  const userId = localStorage.getItem('userId');
+  const token = localStorage.getItem('token'); // <-- ADAUGAT verificare token
+  
+  if (!userId || userId === 'null' || userId === 'undefined' || !token) { // <-- SCHIMBAT
+    alert('Trebuie să te autentifici din nou pentru a salva diagrama! Te rog deloghează-te și loghează-te din nou.');
+    navigate('/login'); // <-- ADAUGAT redirect
+    return;
   }
+  
+  if (nodes.length === 0) {
+    alert('Nu ai niciun nod în diagramă. Adaugă cel puțin un nod înainte de a salva!');
+    return;
+  }
+  
+  setShowSaveModal(true);
+  setSaveError("");
+}
 
   // Funcție pentru confirmarea salvării
   async function confirmSave() {
-    if (!diagramTitle.trim()) {
-      setSaveError('Te rog introdu un nume pentru diagramă!');
-      return;
-    }
-
-    const userId = localStorage.getItem('userId');
-    if (!userId || userId === 'null' || userId === 'undefined') {
-      setSaveError('Sesiune expirată. Te rog reautentifică-te!');
-      return;
-    }
-
-    setIsSaving(true);
-    setSaveError("");
-
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-
-      const response = await fetch(`${apiUrl}/diagrams/save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: parseInt(userId),
-          title: diagramTitle.trim(),
-          tipDiagrama: 'Graf neorientat',
-          nodes: nodes,
-          // Save only user-adjusted control points (if any exist)
-          edges: edges.map(e => {
-            const edge = { from: e.from, to: e.to };
-            // Only include controlPoints if user manually adjusted them
-            if (e.controlPoints && e.controlPoints.length > 0) {
-              const userAdjusted = e.controlPoints.filter(pt => pt && pt.isUserAdjusted);
-              if (userAdjusted.length > 0) {
-                edge.controlPoints = userAdjusted;
-              }
-            }
-            return edge;
-          }),
-          diagramId: currentDiagramId
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setSaveError(data.message || 'Eroare la salvarea diagramei!');
-        setIsSaving(false);
-        return;
-      }
-
-      // Succes!
-      setShowSaveModal(false);
-      setIsSaving(false);
-      // Actualizează ID-ul curent dacă e diagramă nouă
-      if (data.diagramId && !currentDiagramId) {
-        setCurrentDiagramId(data.diagramId);
-      }
-      // Afișează toast-ul de succes
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 5000);
-      
-      // Dacă utilizatorul a apăsat Back și apoi Salvează, navighează la dashboard
-      if (shouldExitAfterSave) {
-        setShouldExitAfterSave(false);
-        setTimeout(() => navigate('/dashboard'), 1500);
-      }
-
-    } catch (err) {
-      setSaveError('Eroare de rețea sau server!');
-      setIsSaving(false);
-    }
+  if (!diagramTitle.trim()) {
+    setSaveError('Te rog introdu un nume pentru diagramă!');
+    return;
   }
+
+  const userId = localStorage.getItem('userId');
+  if (!userId || userId === 'null' || userId === 'undefined') {
+    setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+    return;
+  }
+
+  setIsSaving(true);
+  setSaveError("");
+
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+
+    // <-- ADAUGAT headers cu token
+    const response = await fetch(`${apiUrl}/diagrams/save`, {
+      method: 'POST',
+      headers: getAuthHeaders(),  // <-- SCHIMBAT
+      body: JSON.stringify({
+        userId: parseInt(userId),
+        title: diagramTitle.trim(),
+        tipDiagrama: 'Graf neorientat',
+        nodes: nodes,
+        edges: edges.map(e => {
+          const edge = { from: e.from, to: e.to };
+          if (e.controlPoints && e.controlPoints.length > 0) {
+            const userAdjusted = e.controlPoints.filter(pt => pt && pt.isUserAdjusted);
+            if (userAdjusted.length > 0) {
+              edge.controlPoints = userAdjusted;
+            }
+          }
+          return edge;
+        }),
+        diagramId: currentDiagramId
+      })
+    });
+
+    if (response.status === 401) {
+      setSaveError('Sesiune expirată. Te rog reautentifică-te!');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      setIsSaving(false);
+      setTimeout(() => navigate('/login'), 1500);
+      return;
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setSaveError(data.message || 'Eroare la salvarea diagramei!');
+      setIsSaving(false);
+      return;
+    }
+
+    // Succes!
+    setShowSaveModal(false);
+    setIsSaving(false);
+    if (data.diagramId && !currentDiagramId) {
+      setCurrentDiagramId(data.diagramId);
+    }
+    setShowSuccessToast(true);
+    setTimeout(() => setShowSuccessToast(false), 5000);
+    
+    if (shouldExitAfterSave) {
+      setShouldExitAfterSave(false);
+      setTimeout(() => navigate('/dashboard'), 1500);
+    }
+
+  } catch (err) {
+    setSaveError('Eroare de rețea sau server!');
+    setIsSaving(false);
+  }
+}
 
   // Funcție pentru resetarea la ultima versiune salvată sau ștergerea totală
   async function confirmReset() {

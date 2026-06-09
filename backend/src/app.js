@@ -1,4 +1,4 @@
-
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/auth');
@@ -8,7 +8,7 @@ const classdiagramRoutes = require('./routes/classDiagrams');
 const objectDiagramRoutes = require('./routes/objectDiagrams');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5005;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));

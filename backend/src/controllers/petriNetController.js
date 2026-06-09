@@ -5,12 +5,14 @@ const pool = require('../db');
  * Urmează EXACT același pattern ca saveDiagram din diagramController
  */
 exports.savePetriNet = async (req, res) => {
-  let { userId, title, places, transitions, arcs, diagramId } = req.body;
+  let { title, places, transitions, arcs, diagramId } = req.body;  // <-- SCOTEM userId
+  const userId = req.user.id;  // <-- ADAUGAT: ia din token
 
   try {
-    if (!userId || !title) {
-      return res.status(400).json({ message: 'Lipsa userId sau title!' });
+    if (!title) {  // <-- SCHIMBAT: verifică doar title (userId vine din token)
+      return res.status(400).json({ message: 'Lipsa titlu!' });
     }
+
 
     const tipDiagrama = 'Rețea Petri';
 
@@ -205,6 +207,7 @@ exports.savePetriNet = async (req, res) => {
  */
 exports.loadPetriNet = async (req, res) => {
   const { diagramId } = req.params;
+  const userId = req.user.id;  // <-- ADAUGAT
 
   try {
     // Obține informațiile despre diagramă
@@ -220,6 +223,11 @@ exports.loadPetriNet = async (req, res) => {
     }
 
     const diagram = diagramResult.rows[0];
+    
+    // <-- ADAUGAT: VERIFICĂ PERMISIUNI
+    if (diagram.id_user !== parseInt(userId)) {
+      return res.status(403).json({ message: 'Nu aveți permisiunea să accesați această rețea Petri' });
+    }
 
     // Obține componentele (locuri și tranziții)
     const componentsResult = await pool.query(
@@ -319,7 +327,7 @@ exports.loadPetriNet = async (req, res) => {
  * Obține toate rețelele Petri ale unui utilizator
  */
 exports.getUserPetriNets = async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id;  // <-- SCHIMBAT: ia din token, nu din params
 
   try {
     const result = await pool.query(
@@ -346,8 +354,25 @@ exports.getUserPetriNets = async (req, res) => {
  */
 exports.deletePetriNet = async (req, res) => {
   const { diagramId } = req.params;
+  const userId = req.user.id;  // <-- ADAUGAT
 
   try {
+    // <-- ADAUGAT: VERIFICĂ MAI ÎNTÂI DACĂ DIAGRAMA APARȚINE USERULUI
+    const checkResult = await pool.query(
+      `SELECT id_user FROM diagrame 
+       WHERE id_diagrama = $1 
+       AND id_tip = (SELECT id_tip FROM tipuri_diagrame WHERE nume_tip = 'Rețea Petri')`,
+      [diagramId]
+    );
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Rețeaua Petri nu a fost găsită' });
+    }
+    
+    if (checkResult.rows[0].id_user !== parseInt(userId)) {
+      return res.status(403).json({ message: 'Nu aveți permisiunea să ștergeți această rețea Petri' });
+    }
+
     // Șterge arcurile
     await pool.query('DELETE FROM legaturi_existente WHERE id_diagrama = $1', [diagramId]);
     

@@ -202,6 +202,14 @@ function UseCaseDiagramEditor() {
   const { diagramId } = useParams();
   const canvasRef = useRef(null);
   
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+  };
+
   const [title, setTitle] = useState('Use Case Diagram');
   const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [elements, setElements] = useState([]);
@@ -387,26 +395,39 @@ function UseCaseDiagramEditor() {
   };
 
   const loadDiagram = async (id) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(`/api/class-diagrams/${id}`);
-      const result = await response.json();
-      console.log('Loaded diagram:', result);
-      
-      if (result.diagram?.data) {
-        setTitle(result.diagram.title || 'Use Case Diagram');
-        setElements(result.diagram.data.elements || []);
-        const loadedConnections = result.diagram.data.connections || [];
-        setConnections(ensureConnectionOffsets(loadedConnections));
-        setCurrentDiagramId(id);
-        sessionStorage.setItem('currentDiagramId', id);
-      }
-    } catch (error) {
-      console.error('Error loading:', error);
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    // <-- ADAUGAT headers
+    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      navigate('/login');
+      return;
     }
-  };
+    
+    const result = await response.json();
+    console.log('Loaded diagram:', result);
+    
+    if (result.diagram?.data) {
+      setTitle(result.diagram.title || 'Use Case Diagram');
+      setElements(result.diagram.data.elements || []);
+      const loadedConnections = result.diagram.data.connections || [];
+      setConnections(ensureConnectionOffsets(loadedConnections));
+      setCurrentDiagramId(id);
+      sessionStorage.setItem('currentDiagramId', id);
+    }
+  } catch (error) {
+    console.error('Error loading:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleSaveName = () => {
     if (editingElement) {
@@ -601,119 +622,150 @@ function UseCaseDiagramEditor() {
   };
 
   const handleSaveToDatabase = async () => {
-    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = activeDiagramId 
-      ? title 
-      : prompt('Introdu numele diagramei:', title || 'Use Case Diagram');
-    
-    if (!diagramTitle) return;
+  // <-- ADAUGAT: Verifică token-ul
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a salva diagrama!');
+    navigate('/login');
+    return;
+  }
+  
+  const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+  const diagramTitle = activeDiagramId 
+    ? title 
+    : prompt('Introdu numele diagramei:', title || 'Use Case Diagram');
+  
+  if (!diagramTitle) return;
 
-    try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
-        alert('Trebuie să fii logat pentru a salva diagrama!');
-        return;
-      }
-
-      // Ensure connections have proper offsets before saving
-      const connectionsToSave = ensureConnectionOffsets(connections);
-
-      const diagramData = {
-        diagram: {
-          selectedType: 'USE_CASE',
-          elements: elements,
-          connections: connectionsToSave
-        }
-      };
-
-      console.log('Saving diagram data:', diagramData);
-
-      let response, result, method, url;
-      
-      if (activeDiagramId) {
-        // UPDATE existing diagram
-        method = 'PUT';
-        url = `/api/class-diagrams/${activeDiagramId}`;
-        response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(diagramData)
-        });
-        result = await response.json();
-        
-        if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
-          setTitle(diagramTitle);
-        }
-      } else {
-        // CREATE new diagram
-        method = 'POST';
-        url = 'http://localhost:5005/api/class-diagrams';
-        const newDiagramData = {
-          title: diagramTitle,
-          userId: parseInt(userId),
-          ...diagramData
-        };
-        
-        response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newDiagramData)
-        });
-        result = await response.json();
-        
-        if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-          setCurrentDiagramId(result.diagramId);
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-          setTitle(diagramTitle);
-        }
-      }
-
-      if (!response.ok) {
-        alert(`Eroare: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      alert(`Eroare la salvare: ${error.message}`);
+  try {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+      alert('Trebuie să fii logat pentru a salva diagrama!');
+      navigate('/login');
+      return;
     }
-  };
 
-  const handleImport = () => {
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.json,.svg';
-    fileInput.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+    const connectionsToSave = ensureConnectionOffsets(connections);
 
-      try {
-        const content = await file.text();
-        
-        if (file.name.endsWith('.json')) {
-          const data = JSON.parse(content);
-          if (data.elements && data.connections) {
-            setElements(data.elements);
-            setConnections(ensureConnectionOffsets(data.connections));
-            setTitle(data.title || 'Imported Diagram');
-            setCurrentDiagramId(null);
-            sessionStorage.removeItem('currentDiagramId');
-            setSelectedElement(null);
-            setSelectedConnection(null);
-            alert('✅ Diagram imported successfully!');
-          } else {
-            alert('❌ Invalid JSON format. Missing elements or connections.');
-          }
-        } else if (file.name.endsWith('.svg')) {
-          alert('⚠️ SVG import not yet supported. Please use JSON format.');
-        }
-      } catch (error) {
-        console.error('Error importing file:', error);
-        alert(`❌ Error importing file: ${error.message}`);
+    const diagramData = {
+      diagram: {
+        selectedType: 'USE_CASE',
+        elements: elements,
+        connections: connectionsToSave
       }
     };
-    fileInput.click();
+
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    let response, result;
+
+    if (activeDiagramId) {
+      // UPDATE existing diagram
+      response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(diagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        navigate('/login');
+        return;
+      }
+      
+      result = await response.json();
+      
+      if (response.ok) {
+        alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+        setTitle(diagramTitle);
+      }
+    } else {
+      // CREATE new diagram
+      const newDiagramData = {
+        title: diagramTitle,
+        userId: parseInt(userId),
+        ...diagramData
+      };
+      
+      response = await fetch(`${apiUrl}/class-diagrams`, {
+        method: 'POST',
+        headers: getAuthHeaders(),  // <-- SCHIMBAT
+        body: JSON.stringify(newDiagramData)
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+        navigate('/login');
+        return;
+      }
+      
+      result = await response.json();
+      
+      if (response.ok) {
+        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+        setCurrentDiagramId(result.diagramId);
+        sessionStorage.setItem('currentDiagramId', result.diagramId);
+        setTitle(diagramTitle);
+      }
+    }
+
+    if (!response.ok) {
+      alert(`Eroare: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error saving to database:', error);
+    alert(`Eroare la salvare: ${error.message}`);
+  }
+};
+
+  const handleImport = () => {
+  // <-- Verifică token-ul
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+    navigate('/login');
+    return;
+  }
+  
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.json,.svg';
+  fileInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const content = await file.text();
+      
+      if (file.name.endsWith('.json')) {
+        const data = JSON.parse(content);
+        if (data.elements && data.connections) {
+          setElements(data.elements);
+          setConnections(ensureConnectionOffsets(data.connections));
+          setTitle(data.title || 'Imported Diagram');
+          setCurrentDiagramId(null);
+          sessionStorage.removeItem('currentDiagramId');
+          setSelectedElement(null);
+          setSelectedConnection(null);
+          alert('✅ Diagram imported successfully!');
+        } else {
+          alert('❌ Invalid JSON format. Missing elements or connections.');
+        }
+      } else if (file.name.endsWith('.svg')) {
+        alert('⚠️ SVG import not yet supported. Please use JSON format.');
+      }
+    } catch (error) {
+      console.error('Error importing file:', error);
+      alert(`❌ Error importing file: ${error.message}`);
+    }
   };
+  fileInput.click();
+};
 
   const escapeXML = (str) => {
     if (!str) return '';
