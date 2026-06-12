@@ -723,32 +723,40 @@ export default function CompositeStructureDiagramEditor() {
   };
 
   useEffect(() => {
-    const handleImportFile = async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      try {
-        const content = await file.text();
-        const data = JSON.parse(content);
-        if (data.elements && data.connections) {
-          setElements(data.elements);
-          setConnections(ensureConnectionOffsets(data.connections));
-          setTitle(data.title || 'Imported Diagram');
-          setSelectedElement(null);
-          setSelectedConnection(null);
-          alert('✅ Diagram imported successfully!');
-        }
-      } catch (error) {
-        alert('Error importing file');
-      }
-    };
-
-    const input = fileInputRef.current;
-    if (input) {
-      input.addEventListener('change', handleImportFile);
-      return () => input.removeEventListener('change', handleImportFile);
+    // <-- Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+      window.location.href = '/login';
+      return;
     }
-  }, []);
+
+    try {
+      const content = await file.text();
+      const data = JSON.parse(content);
+      if (data.elements && data.connections) {
+        setElements(data.elements);
+        setConnections(ensureConnectionOffsets(data.connections));
+        setTitle(data.title || 'Imported Diagram');
+        setSelectedElement(null);
+        setSelectedConnection(null);
+        alert('✅ Diagram imported successfully!');
+      }
+    } catch (error) {
+      alert('Error importing file');
+    }
+  };
+
+  const input = fileInputRef.current;
+  if (input) {
+    input.addEventListener('change', handleImportFile);
+    return () => input.removeEventListener('change', handleImportFile);
+  }
+}, []);
 
   return (
     <div className="uml-editor" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>

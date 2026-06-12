@@ -738,7 +738,7 @@ function DeploymentDiagramEditor() {
   try {
     const apiUrl = process.env.REACT_APP_API_URL || '/api';
     // <-- ADAUGAT headers
-    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+    const response = await fetch(`${apiUrl}/diagrams/${id}`, {
       headers: getAuthHeaders()
     });
     
@@ -755,7 +755,7 @@ function DeploymentDiagramEditor() {
     console.log('Load response:', result);
     
     if (response.ok) {
-      setTitle(result.diagram.title || 'Deployment Diagram');
+      setTitle(result.diagram?.title || result.title || 'Deployment Diagram');
       
       let loadedElements = result.elements || result.data?.elements || [];
       let loadedConnections = result.connections || result.data?.connections || [];

@@ -799,7 +799,7 @@ function PetriNetEditor() {
   const height = maxY - minY;
 
   let svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}">
   <defs>
     <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
       <polygon points="0 0, 10 3, 0 6" fill="#5b21b6" stroke="#5b21b6" stroke-width="0.5"/>
@@ -871,8 +871,8 @@ function PetriNetEditor() {
 
   // Draw places (la fel)
   places.forEach(p => {
-    const x = p.x - minX;
-    const y = p.y - minY;
+    const x = p.x;
+    const y = p.y;
     svg += `  <circle cx="${x}" cy="${y}" r="${PLACE_RADIUS}" fill="white" stroke="#5b21b6" stroke-width="2"/>\n`;
     svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${p.label}</text>\n`;
     
@@ -889,8 +889,8 @@ function PetriNetEditor() {
 
   // Draw transitions (la fel)
   transitions.forEach(t => {
-    const x = t.x - minX;
-    const y = t.y - minY;
+    const x = t.x;
+    const y = t.y;
     svg += `  <rect x="${x - TRANSITION_WIDTH / 2}" y="${y - TRANSITION_HEIGHT / 2}" width="${TRANSITION_WIDTH}" height="${TRANSITION_HEIGHT}" fill="white" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
     svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${t.label}</text>\n`;
   });
@@ -1003,24 +1003,31 @@ function PetriNetEditor() {
                 style={{ cursor: 'grab' }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
-                  const rect = canvasRef.current.getBoundingClientRect();
-                  const mouseX = e.clientX - rect.left;
-                  const mouseY = e.clientY - rect.top;
                   
-                  // Create new control point at click position
-                  const newControlPoints = [...(arc.controlPoints || [])];
-                  newControlPoints.push({ x: mouseX, y: mouseY, isUserAdjusted: true });
-                  
-                  setArcs(arcs =>
-                    arcs.map((a, arcIdx) => {
-                      if (a.id !== arc.id) return a;
-                      return { ...a, controlPoints: newControlPoints };
-                    })
-                  );
-                  
-                  // Start dragging this new point immediately
-                  const arcIdx = arcs.findIndex(a => a.id === arc.id);
-                  setDraggingControlPoint({ arcIdx: arcIdx, pointIdx: newControlPoints.length - 1 });
+                  if (selectedElement?.type === 'arc' && selectedElement?.id === arc.id) {
+                    // Dacă e deja selectat, adaugă un punct nou
+                    const rect = canvasRef.current.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    
+                    // Create new control point at click position
+                    const newControlPoints = [...(arc.controlPoints || [])];
+                    newControlPoints.push({ x: mouseX, y: mouseY, isUserAdjusted: true });
+                    
+                    setArcs(arcs =>
+                      arcs.map((a, arcIdx) => {
+                        if (a.id !== arc.id) return a;
+                        return { ...a, controlPoints: newControlPoints };
+                      })
+                    );
+                    
+                    // Start dragging this new point immediately
+                    const arcIdx = arcs.findIndex(a => a.id === arc.id);
+                    setDraggingControlPoint({ arcIdx: arcIdx, pointIdx: newControlPoints.length - 1 });
+                  } else {
+                    // Selectează arcul prima dată (asta va afișa cerculețele și îl va face roșu)
+                    setSelectedElement({ type: 'arc', id: arc.id });
+                  }
                 }}
               />
               <polygon
@@ -1029,6 +1036,31 @@ function PetriNetEditor() {
                 stroke="#5b21b6"
                 strokeWidth="0.5"
               />
+              {/* Afișează cercurile pentru puncte intermediare (control points) dacă arcul e selectat */}
+              {selectedElement?.id === arc.id && arc.controlPoints && arc.controlPoints.map((pt, ptIdx) => (
+                <circle
+                  key={ptIdx}
+                  cx={pt.x}
+                  cy={pt.y}
+                  r="6"
+                  fill="#fff"
+                  stroke="#dc2626"
+                  strokeWidth="2"
+                  style={{ cursor: 'move' }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    const arcIdx = arcs.findIndex(a => a.id === arc.id);
+                    setDraggingControlPoint({ arcIdx: arcIdx, pointIdx: ptIdx });
+                    setSelectedElement({ type: 'arc', id: arc.id });
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    // Șterge punctul intermediar la dublu-click
+                    const newControlPoints = arc.controlPoints.filter((_, idx) => idx !== ptIdx);
+                    setArcs(arcs => arcs.map(a => a.id === arc.id ? { ...a, controlPoints: newControlPoints } : a));
+                  }}
+                />
+              ))}
             </g>
           );
         })}
