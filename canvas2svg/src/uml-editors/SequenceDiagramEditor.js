@@ -142,6 +142,8 @@ function SequenceDiagramEditor() {
   const [saveDialogTitle, setSaveDialogTitle] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  const [draggingSelfMessage, setDraggingSelfMessage] = useState(null); // {connId, startMouseY, initialOffsetY}
+  
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
@@ -297,6 +299,45 @@ function SequenceDiagramEditor() {
     };
   }, [resizing, elements]);
 
+  // Drag pentru self-message
+useEffect(() => {
+  if (!draggingSelfMessage) return;
+
+  const handleMouseMove = (e) => {
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    if (!canvasRect) return;
+    
+    const currentMouseY = e.clientY - canvasRect.top;
+    const deltaY = currentMouseY - draggingSelfMessage.startMouseY;
+    
+    // Calculează noul offset
+    const newOffsetY = Math.max(0, draggingSelfMessage.initialOffsetY + deltaY);
+    
+    // Actualizează conexiunea cu noul offset
+    setConnections(prevConnections => 
+      prevConnections.map(c => {
+        if (c.id !== draggingSelfMessage.connId) return c;
+        return {
+          ...c,
+          offsetY: newOffsetY, // Salvează offset-ul în conexiune
+        };
+      })
+    );
+  };
+
+  const handleMouseUp = () => {
+    setDraggingSelfMessage(null);
+  };
+
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mouseup', handleMouseUp);
+
+  return () => {
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
+  };
+}, [draggingSelfMessage]);
+
   const loadDiagram = async (id) => {
     setIsLoading(true);
     try {
@@ -376,6 +417,7 @@ function SequenceDiagramEditor() {
             toPoint: clickedPoint,
             label: SEQUENCE_ELEMENTS[connectionMode]?.label || 'Self Message',
             side: 'right',
+            offsetY: 30,  // <-- TREBUIE SĂ FIE AICI
             waypoints: []
           };
 
@@ -699,63 +741,84 @@ const confirmSave = async () => {
 
     // LAYER 3: Desenează conexiuni (messages) - TREBUIE INAINTEA ACTIVATION BARS
     connections.forEach((conn) => {
-      const fromEl = elements.find(e => e.id === conn.from);
-      const toEl = elements.find(e => e.id === conn.to);
-      if (!fromEl || !toEl) return;
+  const fromEl = elements.find(e => e.id === conn.from);
+  const toEl = elements.find(e => e.id === conn.to);
+  if (!fromEl || !toEl) return;
 
-      const startX = fromEl.x + fromEl.width / 2;
-      const endX = toEl.x + toEl.width / 2;
-      let startY = conn.fromPoint?.y !== undefined ? conn.fromPoint.y : fromEl.y + fromEl.height;
+  const startX = fromEl.x + fromEl.width / 2;
+  const endX = toEl.x + toEl.width / 2;
+  let startY = conn.fromPoint?.y !== undefined ? conn.fromPoint.y : fromEl.y + fromEl.height;
+  let endY = conn.toPoint?.y !== undefined ? conn.toPoint.y : startY + 50;
 
-      // Pentru self-message, endY trebuie să fie mai jos pentru a vedea buclă
-      let endY;
-      if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
-        // Self-message: endY = toPoint sau startY + 50 (pentru buclă)
-        endY = conn.toPoint?.y || (startY + 50);
-      } else {
-        endY = conn.toPoint?.y !== undefined ? conn.toPoint.y : startY + 50;
-      }
+  let marker = "url(#arrowSyncMessage)";
+  let strokeDasharray = "none";
+  let strokeWidth = "2";
 
-      let marker = "url(#arrowSyncMessage)";
-      let strokeDasharray = "none";
-      let strokeWidth = "2";
+  if (conn.type === 'ASYNC_MESSAGE' || conn.type === 'CREATE_MESSAGE') marker = "url(#arrowAsyncMessage)";
+  else if (conn.type === 'RETURN_MESSAGE') { strokeDasharray = "6,6"; marker = "url(#arrowReturnMessage)"; }
 
-      if (conn.type === 'ASYNC_MESSAGE' || conn.type === 'CREATE_MESSAGE') marker = "url(#arrowAsyncMessage)";
-      else if (conn.type === 'RETURN_MESSAGE') { strokeDasharray = "6,6"; marker = "url(#arrowReturnMessage)"; }
+  // SELF_MESSAGE - desenat cu offsetY
+  if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
+    const offset = 30;
+    const side = conn.side || 'left';
+    const loopHeight = 50;
+    const offsetY = conn.offsetY !== undefined ? conn.offsetY : 30;
+    
+    const selfStartX = fromEl.x + fromEl.width / 2;
+    const selfStartY = fromEl.y + offsetY;
+    const selfEndY = selfStartY + loopHeight;
+    
+    let path;
+    if (side === 'left') {
+      path = `M ${selfStartX} ${selfStartY} L ${selfStartX - offset} ${selfStartY} L ${selfStartX - offset} ${selfEndY} L ${selfStartX} ${selfEndY}`;
+    } else {
+      path = `M ${selfStartX} ${selfStartY} L ${selfStartX + offset} ${selfStartY} L ${selfStartX + offset} ${selfEndY} L ${selfStartX} ${selfEndY}`;
+    }
+    
+    svg += `<path d='${path}' fill='none' stroke='#333' stroke-width='${strokeWidth}' marker-end='${marker}' stroke-dasharray='${strokeDasharray}' stroke-linecap='round' stroke-linejoin='round' />\n`;
+    
+    // Activation bar
+    const barX = selfStartX - 6;
+    const barWidth = 12;
+    const barHeight = 50;
+    svg += `<rect x='${barX}' y='${selfStartY}' width='${barWidth}' height='${barHeight}' fill='#bae6fd' stroke='#0284c7' stroke-width='2' />\n`;
+    return;
+  }
 
-      if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
-        // Self-message: buclă în U - desenează buclă compactă pe stânga
-        const offset = 30;
-        const side = conn.side || 'left';
-        // Buclă de 50px înălțime
-        const loopHeight = 50;
-        let path;
-        if (side === 'left') {
-          path = `M ${startX} ${startY} L ${startX - offset} ${startY} L ${startX - offset} ${startY + loopHeight} L ${startX} ${startY + loopHeight}`;
-        } else {
-          path = `M ${startX} ${startY} L ${startX + offset} ${startY} L ${startX + offset} ${startY + loopHeight} L ${startX} ${startY + loopHeight}`;
-        }
-        svg += `<path d='${path}' fill='none' stroke='#333' stroke-width='${strokeWidth}' marker-end='${marker}' stroke-dasharray='${strokeDasharray}' stroke-linecap='round' stroke-linejoin='round' />\n`;
-      } else if (conn.type !== 'DELETE_MESSAGE') {
-        // Normal message
-        svg += `<line x1='${startX}' y1='${startY}' x2='${endX}' y2='${endY}' stroke='#333' stroke-width='${strokeWidth}' marker-end='${marker}' stroke-dasharray='${strokeDasharray}' stroke-linecap='round' stroke-linejoin='round' />\n`;
-      }
-    });
+  // DELETE_MESSAGE
+  if (conn.type === 'DELETE_MESSAGE') {
+    const endEl = elements.find(e => e.id === conn.to);
+    const delEndX = endEl ? endEl.x + endEl.width / 2 : endX;
+    const delEndY = endEl ? endEl.y + endEl.height : endY;
+    const xSize = 12;
+    const pathD = waypointsToPath([{ x: startX, y: startY }, { x: delEndX, y: delEndY }]);
+    svg += `<path d='${pathD}' fill='none' stroke='#333' stroke-width='${strokeWidth}' />\n`;
+    svg += `<line x1='${delEndX - xSize / 2}' y1='${delEndY - xSize / 2}' x2='${delEndX + xSize / 2}' y2='${delEndY + xSize / 2}' stroke='#333' stroke-width='${strokeWidth}' />\n`;
+    svg += `<line x1='${delEndX - xSize / 2}' y1='${delEndY + xSize / 2}' x2='${delEndX + xSize / 2}' y2='${delEndY - xSize / 2}' stroke='#333' stroke-width='${strokeWidth}' />\n`;
+    return;
+  }
+
+  // Normal message
+  const pathD = waypointsToPath([{ x: startX, y: startY }, { x: endX, y: endY }]);
+  svg += `<path d='${pathD}' fill='none' stroke='#333' stroke-width='${strokeWidth}' marker-end='${marker}' stroke-dasharray='${strokeDasharray}' stroke-linecap='round' stroke-linejoin='round' />\n`;
+});
 
     // LAYER 4: Desenează activation bars - DOAR pe self-messages
-    connections.forEach((conn) => {
-      const fromEl = elements.find(e => e.id === conn.from);
-      if (!fromEl) return;
+connections.forEach((conn) => {
+  const fromEl = elements.find(e => e.id === conn.from);
+  if (!fromEl) return;
 
-      // Activation bars DOAR pe self-messages
-      if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
-        const startY = conn.fromPoint?.y || fromEl.y + fromEl.height;
-        const barX = fromEl.x + fromEl.width / 2 - 6;
-        const barWidth = 12;
-        const barHeight = 50;
-        svg += `<rect x='${barX}' y='${startY}' width='${barWidth}' height='${barHeight}' fill='#bae6fd' stroke='#0284c7' stroke-width='2' />\n`;
-      }
-    });
+  // Activation bars DOAR pe self-messages
+  if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
+    // Folosește același offsetY ca și pentru self-message
+    const offsetY = conn.offsetY !== undefined ? conn.offsetY : 30;
+    const startY = fromEl.y + offsetY; // <-- ACEEAȘI LOGICĂ CA ÎN getConnectionPoints
+    const barX = fromEl.x + fromEl.width / 2 - 6;
+    const barWidth = 12;
+    const barHeight = 50;
+    svg += `<rect x='${barX}' y='${startY}' width='${barWidth}' height='${barHeight}' fill='#bae6fd' stroke='#0284c7' stroke-width='2' />\n`;
+  }
+});
 
     // LAYER 5: Desenează elemente - cu SVG-uri exact din editor
     elements.forEach((el) => {
@@ -912,13 +975,12 @@ const confirmSave = async () => {
       let endY = conn.toPoint?.y !== undefined ? conn.toPoint.y : startY;
 
       if (conn.type === 'SELF_MESSAGE') {
-        // Self message on side of element
-        const side = conn.side || 'right';
-        startY = fromEl.y + 30; // Start near top of element
-        endY = startY + 50; // 50px down
-        return { startX, startY, endX: startX, endY, side, targetEdge: 'right' };
-      }
-      return { startX, startY, endX, endY: startY, targetEdge: 'right' };
+  const side = conn.side || 'right';
+  const offsetY = conn.offsetY !== undefined ? conn.offsetY : 30;
+  const startY = fromEl.y + offsetY;
+  const endY = startY + 50;
+  return { startX, startY, endX: startX, endY, side, targetEdge: 'right' };
+}
     }
     return null;
   };
@@ -1084,35 +1146,77 @@ const confirmSave = async () => {
               else if (conn.type === 'RETURN_MESSAGE') { strokeDasharray = '6,6'; marker = 'url(#arrowReturnMessage)'; }
 
               if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
-                const x = points.startX;
-                const y = points.startY;
-                const endY = points.endY;
-                const side = conn.side || 'right';
-                const offset = 60;
-
-                // Left or right sided U-shape
-                let selfPath;
-                if (side === 'left') {
-                  // Left side: (x, y) -> (x - offset, y) -> (x - offset, endY) -> (x, endY)
-                  selfPath = `M ${x} ${y} L ${x - offset} ${y} L ${x - offset} ${endY} L ${x} ${endY}`;
-                } else {
-                  // Right side: (x, y) -> (x + offset, y) -> (x + offset, endY) -> (x, endY)
-                  selfPath = `M ${x} ${y} L ${x + offset} ${y} L ${x + offset} ${endY} L ${x} ${endY}`;
-                }
-
-                return (
-                  <g key={conn.id} onClick={(e) => handleConnectionLineClick(e, conn.id)} onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    // Toggle side on double click
-                    setConnections(connections.map(c =>
-                      c.id === conn.id ? { ...c, side: c.side === 'left' ? 'right' : 'left' } : c
-                    ));
-                  }} style={{ cursor: 'pointer' }}>
-                    {/* Main loop path */}
-                    <path d={selfPath} fill="none" stroke={stroke} strokeWidth={strokeWidth} markerEnd={marker} />
-                  </g>
-                );
-              }
+  const fromEl = elements.find(e => e.id === conn.from);
+  if (!fromEl) return null;
+  
+  const offset = 30;
+  const side = conn.side || 'left';
+  const loopHeight = 50;
+  const offsetY = conn.offsetY !== undefined ? conn.offsetY : 30;
+  
+  const selfStartX = fromEl.x + fromEl.width / 2;
+  const selfStartY = fromEl.y + offsetY;
+  const selfEndY = selfStartY + loopHeight;
+  
+  let selfPath;
+  if (side === 'left') {
+    selfPath = `M ${selfStartX} ${selfStartY} L ${selfStartX - offset} ${selfStartY} L ${selfStartX - offset} ${selfEndY} L ${selfStartX} ${selfEndY}`;
+  } else {
+    selfPath = `M ${selfStartX} ${selfStartY} L ${selfStartX + offset} ${selfStartY} L ${selfStartX + offset} ${selfEndY} L ${selfStartX} ${selfEndY}`;
+  }
+  
+  return (
+    <g 
+      key={conn.id} 
+      onClick={(e) => handleConnectionLineClick(e, conn.id)} 
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        setConnections(connections.map(c =>
+          c.id === conn.id ? { ...c, side: c.side === 'left' ? 'right' : 'left' } : c
+        ));
+      }} 
+      style={{ cursor: 'grab' }}
+    >
+      <path
+        d={selfPath}
+        stroke="transparent"
+        strokeWidth={12}
+        fill="none"
+        pointerEvents="auto"
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          const canvasRect = canvasRef.current?.getBoundingClientRect();
+          if (!canvasRect || !fromEl) return;
+          const mouseY = e.clientY - canvasRect.top;
+          const currentOffsetY = selfStartY - fromEl.y;
+          setDraggingSelfMessage({
+            connId: conn.id,
+            startMouseY: mouseY,
+            initialOffsetY: currentOffsetY,
+          });
+          setSelectedConnection(conn.id);
+        }}
+      />
+      <path
+        d={selfPath}
+        fill="none"
+        stroke={selectedConnection === conn.id ? '#ec4899' : '#333'}
+        strokeWidth={selectedConnection === conn.id ? 3 : 2}
+        markerEnd={marker}
+      />
+      {/* Activation bar for self-message */}
+      <rect
+        x={selfStartX - 6}
+        y={selfStartY}
+        width="12"
+        height="50"
+        fill="#bae6fd"
+        stroke="#0284c7"
+        strokeWidth="2"
+      />
+    </g>
+  );
+}
 
               if (conn.type === 'DELETE_MESSAGE') {
                 const endEl = elements.find(el => el.id === conn.to);

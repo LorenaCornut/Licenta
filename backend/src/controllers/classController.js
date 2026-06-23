@@ -180,27 +180,28 @@ exports.saveClassDiagram = async (req, res) => {
       }
 
       await client.query(
-        `INSERT INTO legaturi_existente
-         (id_diagrama, id_legatura, id_start, id_end, text, puncte_intermediare)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          idDiagrama,
-          idLegatura,
-          idStart,
-          idEnd,
-          JSON.stringify({ 
-            type: connection.type, 
-            label: connection.label,
-            fromPoint: connection.fromPoint,
-            toPoint: connection.toPoint,
-            fromEdge: connection.fromEdge,
-            fromOffset: typeof connection.fromOffset === 'number' ? connection.fromOffset : 0.5,
-            toEdge: connection.toEdge,
-            toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5
-          }),
-          JSON.stringify(connection.controlPoints || [])
-        ]
-      );
+  `INSERT INTO legaturi_existente
+   (id_diagrama, id_legatura, id_start, id_end, text, puncte_intermediare)
+   VALUES ($1, $2, $3, $4, $5, $6)`,
+  [
+    idDiagrama,
+    idLegatura,
+    idStart,
+    idEnd,
+    JSON.stringify({ 
+      type: connection.type, 
+      label: connection.label,
+      fromPoint: connection.fromPoint,
+      toPoint: connection.toPoint,
+      fromEdge: connection.fromEdge,
+      fromOffset: typeof connection.fromOffset === 'number' ? connection.fromOffset : 0.5,
+      toEdge: connection.toEdge,
+      toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5,
+      offsetY: connection.offsetY  // <-- ADAUGĂ ASTA
+    }),
+    JSON.stringify(connection.controlPoints || [])
+  ]
+);
     }
 
     await client.query('COMMIT');
@@ -297,7 +298,8 @@ exports.getClassDiagram = async (req, res) => {
         fromOffset: typeof connectionData.fromOffset === 'number' ? connectionData.fromOffset : 0.5,
         toEdge: connectionData.toEdge,
         toOffset: typeof connectionData.toOffset === 'number' ? connectionData.toOffset : 0.5,
-        controlPoints: waypoints  // Frontend uses controlPoints, not waypoints
+        controlPoints: waypoints,  // Frontend uses controlPoints, not waypoints
+        offsetY: connectionData.offsetY  // <-- ADAUGĂ ASTA
       };
     });
 
@@ -458,15 +460,16 @@ exports.updateClassDiagram = async (req, res) => {
           idStart,
           idEnd,
           JSON.stringify({ 
-            type: connection.type, 
-            label: connection.label,
-            fromPoint: connection.fromPoint,
-            toPoint: connection.toPoint,
-            fromEdge: connection.fromEdge,
-            fromOffset: typeof connection.fromOffset === 'number' ? connection.fromOffset : 0.5,
-            toEdge: connection.toEdge,
-            toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5
-          }),
+  type: connection.type, 
+  label: connection.label,
+  fromPoint: connection.fromPoint,
+  toPoint: connection.toPoint,
+  fromEdge: connection.fromEdge,
+  fromOffset: typeof connection.fromOffset === 'number' ? connection.fromOffset : 0.5,
+  toEdge: connection.toEdge,
+  toOffset: typeof connection.toOffset === 'number' ? connection.toOffset : 0.5,
+  offsetY: connection.offsetY  // <-- ADAUGĂ ASTA
+}),
           JSON.stringify(connection.controlPoints || [])
         ]
       );
