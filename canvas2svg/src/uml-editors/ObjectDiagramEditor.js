@@ -447,6 +447,10 @@ function ObjectDiagramEditor() {
   const endpointDragRef = useRef(null);
   const [currentDiagramId, setCurrentDiagramId] = useState(null);
 
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveDialogTitle, setSaveDialogTitle] = useState('');
+  const [saveError, setSaveError] = useState('');
+
   const elementsList = OBJECT_ELEMENTS;
 
   useEffect(() => {
@@ -1053,14 +1057,13 @@ function ObjectDiagramEditor() {
 };
 
   const handleSaveToDatabase = async () => {
-  // <-- ADAUGAT: Verifică token-ul
   const token = localStorage.getItem('token');
   if (!token) {
     alert('Trebuie să fii autentificat pentru a salva diagrama!');
     navigate('/login');
     return;
   }
-  
+
   if (currentDiagramId) {
     const result = await saveDiagram({
       diagramTitle: title,
@@ -1068,30 +1071,33 @@ function ObjectDiagramEditor() {
     });
 
     if (result.ok) {
-      alert('Diagrama a fost salvată cu succes!');
+      alert('✅ Diagrama a fost actualizată cu succes!');
     } else {
-      alert(result.message || 'Eroare la salvare!');
+      alert(result.message || 'Eroare la actualizare!');
     }
     return;
   }
-  
-  // New diagram - ask for title
-  const diagramTitle = prompt('Introdu numele diagramei:', title || 'UML Object Diagram');
-  if (!diagramTitle) return;
 
-  const userId = localStorage.getItem('userId');
-  if (!userId) {
-    alert('Trebuie să fii logat pentru a salva diagrama!');
-    navigate('/login');
+  setSaveDialogTitle(title || 'UML Object Diagram');
+  setShowSaveModal(true);
+  setSaveError('');
+};
+
+const confirmSave = async () => {
+  if (!saveDialogTitle.trim()) {
+    setSaveError('Te rog introdu un nume pentru diagramă!');
     return;
   }
 
-  const result = await saveDiagram({ diagramTitle });
+  const result = await saveDiagram({ diagramTitle: saveDialogTitle.trim() });
 
   if (result.ok) {
-    alert(`Diagrama "${diagramTitle}" a fost salvată cu succes!`);
+    setShowSaveModal(false);
+    setSaveDialogTitle('');
+    setSaveError('');
+    alert('✅ Diagrama a fost salvată cu succes!');
   } else {
-    alert(result.message || 'Eroare la salvare!');
+    setSaveError(result.message || 'Eroare la salvare!');
   }
 };
 
@@ -2022,6 +2028,96 @@ function ObjectDiagramEditor() {
         </div>
         </div>
       </div>
+
+      {/* Save Diagram Modal */}
+{showSaveModal && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10001
+  }}>
+    <div style={{
+      backgroundColor: 'white',
+      padding: '30px',
+      borderRadius: '8px',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      minWidth: '400px'
+    }}>
+      <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Salvează Diagrama</h2>
+      <label style={{ display: 'block', marginBottom: '10px', fontWeight: '500' }}>Nume diagramă:</label>
+      <input
+        type="text"
+        value={saveDialogTitle}
+        onChange={(e) => setSaveDialogTitle(e.target.value)}
+        placeholder="Introdu numele diagramei..."
+        style={{
+          width: '100%',
+          padding: '10px',
+          marginBottom: '20px',
+          border: '1px solid #d1d5db',
+          borderRadius: '4px',
+          fontSize: '14px',
+          boxSizing: 'border-box'
+        }}
+        onKeyPress={(e) => e.key === 'Enter' && confirmSave()}
+        autoFocus
+      />
+      {saveError && (
+        <div style={{ 
+          color: '#b91c1c', 
+          marginBottom: '15px',
+          fontSize: '0.9rem',
+          padding: '8px',
+          backgroundColor: '#fee2e2',
+          borderRadius: '4px'
+        }}>
+          {saveError}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => {
+            setShowSaveModal(false);
+            setSaveError('');
+          }}
+          style={{
+            padding: '10px 20px',
+            border: '1px solid #d1d5db',
+            borderRadius: '4px',
+            backgroundColor: '#f3f4f6',
+            cursor: 'pointer',
+            fontSize: '14px'
+          }}
+        >
+          Anulează
+        </button>
+        <button
+          onClick={confirmSave}
+          style={{
+            padding: '10px 20px',
+            border: 'none',
+            borderRadius: '4px',
+            backgroundColor: '#7c3aed',
+            color: 'white',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '500'
+          }}
+        >
+          Salvează
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
       </>
     );
 }

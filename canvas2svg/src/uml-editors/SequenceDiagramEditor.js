@@ -138,6 +138,10 @@ function SequenceDiagramEditor() {
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const endpointDragRef = useRef(null);
 
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveDialogTitle, setSaveDialogTitle] = useState('');
+  const [saveError, setSaveError] = useState('');
+
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
       loadDiagram(diagramId);
@@ -459,105 +463,136 @@ function SequenceDiagramEditor() {
     setDraggedType(null);
   };
 
-  const handleSaveToDatabase = async () => {
-    // <-- ADAUGAT: Verifică token-ul
-    const token = localStorage.getItem('token');
-    if (!token) {
-      alert('Trebuie să fii autentificat pentru a salva diagrama!');
-      navigate('/login');
-      return;
-    }
+  const saveDiagram = async ({ diagramTitle, diagramIdToUpdate = null }) => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a salva diagrama!');
+    navigate('/login');
+    return { ok: false, message: 'Neautentificat' };
+  }
 
-    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-    const diagramTitle = activeDiagramId
-      ? title
-      : prompt('Introdu numele diagramei:', title || 'Sequence Diagram');
+  const userId = localStorage.getItem('userId');
+  if (!userId) {
+    alert('Trebuie să fii logat pentru a salva diagrama!');
+    navigate('/login');
+    return { ok: false, message: 'Neautentificat' };
+  }
 
-    if (!diagramTitle) return;
-
-    try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
-        alert('Trebuie să fii logat pentru a salva diagrama!');
-        navigate('/login');
-        return;
+  try {
+    const apiUrl = process.env.REACT_APP_API_URL || '/api';
+    const diagramData = {
+      diagram: {
+        selectedType: 'SEQUENCE',
+        elements: elements,
+        connections: connections
       }
+    };
 
-      const diagramData = {
-        diagram: {
-          selectedType: 'SEQUENCE',
-          elements: elements,
-          connections: connections
-        }
+    let response;
+
+    if (diagramIdToUpdate) {
+      response = await fetch(`${apiUrl}/class-diagrams/${diagramIdToUpdate}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(diagramData)
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        navigate('/login');
+        return { ok: false, message: 'Sesiune expirată' };
+      }
+    } else {
+      const newDiagramData = {
+        title: diagramTitle,
+        userId: parseInt(userId),
+        ...diagramData
       };
 
-      const apiUrl = process.env.REACT_APP_API_URL || '/api';
-      let response, result;
+      response = await fetch(`${apiUrl}/class-diagrams`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newDiagramData)
+      });
 
-      if (activeDiagramId) {
-        // UPDATE existing diagram
-        response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
-          method: 'PUT',
-          headers: getAuthHeaders(),  // <-- SCHIMBAT
-          body: JSON.stringify(diagramData)
-        });
-
-        if (response.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          localStorage.removeItem('username');
-          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-          navigate('/login');
-          return;
-        }
-
-        result = await response.json();
-
-        if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
-          setTitle(diagramTitle);
-        }
-      } else {
-        // CREATE new diagram
-        const newDiagramData = {
-          title: diagramTitle,
-          userId: parseInt(userId),
-          ...diagramData
-        };
-
-        response = await fetch(`${apiUrl}/class-diagrams`, {
-          method: 'POST',
-          headers: getAuthHeaders(),  // <-- SCHIMBAT
-          body: JSON.stringify(newDiagramData)
-        });
-
-        if (response.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          localStorage.removeItem('username');
-          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-          navigate('/login');
-          return;
-        }
-
-        result = await response.json();
-
-        if (response.ok) {
-          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-          setCurrentDiagramId(result.diagramId);
-          sessionStorage.setItem('currentDiagramId', result.diagramId);
-          setTitle(diagramTitle);
-        }
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        navigate('/login');
+        return { ok: false, message: 'Sesiune expirată' };
       }
-
-      if (!response.ok) {
-        alert(`Eroare: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Error saving to database:', error);
-      alert(`Eroare la salvare: ${error.message}`);
     }
-  };
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return { ok: false, message: result.error || 'Eroare la salvare!' };
+    }
+
+    const persistedId = result.diagramId || diagramIdToUpdate;
+    if (persistedId) {
+      setCurrentDiagramId(persistedId);
+      sessionStorage.setItem('currentDiagramId', persistedId);
+    }
+
+    if (diagramTitle) {
+      setTitle(diagramTitle);
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.error('Error saving diagram:', error);
+    return { ok: false, message: `Eroare: ${error.message}` };
+  }
+};
+
+  const handleSaveToDatabase = async () => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Trebuie să fii autentificat pentru a salva diagrama!');
+    navigate('/login');
+    return;
+  }
+
+  if (currentDiagramId) {
+    const result = await saveDiagram({
+      diagramTitle: title,
+      diagramIdToUpdate: currentDiagramId
+    });
+
+    if (result.ok) {
+      alert('✅ Diagrama a fost actualizată cu succes!');
+    } else {
+      alert(result.message || 'Eroare la actualizare!');
+    }
+    return;
+  }
+
+  setSaveDialogTitle(title || 'Sequence Diagram');
+  setShowSaveModal(true);
+  setSaveError('');
+};
+
+const confirmSave = async () => {
+  if (!saveDialogTitle.trim()) {
+    setSaveError('Te rog introdu un nume pentru diagramă!');
+    return;
+  }
+
+  const result = await saveDiagram({ diagramTitle: saveDialogTitle.trim() });
+
+  if (result.ok) {
+    setShowSaveModal(false);
+    setSaveDialogTitle('');
+    setSaveError('');
+    alert('✅ Diagrama a fost salvată cu succes!');
+  } else {
+    setSaveError(result.message || 'Eroare la salvare!');
+  }
+};
 
   const handleImport = () => {
     // <-- Verifică token-ul
@@ -1441,6 +1476,95 @@ function SequenceDiagramEditor() {
           )}
         </div>
       </div>
+
+      {/* Save Diagram Modal */}
+{showSaveModal && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10001
+  }}>
+    <div style={{
+      backgroundColor: 'white',
+      padding: '30px',
+      borderRadius: '8px',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      minWidth: '400px'
+    }}>
+      <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Salvează Diagrama</h2>
+      <label style={{ display: 'block', marginBottom: '10px', fontWeight: '500' }}>Nume diagramă:</label>
+      <input
+        type="text"
+        value={saveDialogTitle}
+        onChange={(e) => setSaveDialogTitle(e.target.value)}
+        placeholder="Introdu numele diagramei..."
+        style={{
+          width: '100%',
+          padding: '10px',
+          marginBottom: '20px',
+          border: '1px solid #d1d5db',
+          borderRadius: '4px',
+          fontSize: '14px',
+          boxSizing: 'border-box'
+        }}
+        onKeyPress={(e) => e.key === 'Enter' && confirmSave()}
+        autoFocus
+      />
+      {saveError && (
+        <div style={{ 
+          color: '#b91c1c', 
+          marginBottom: '15px',
+          fontSize: '0.9rem',
+          padding: '8px',
+          backgroundColor: '#fee2e2',
+          borderRadius: '4px'
+        }}>
+          {saveError}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => {
+            setShowSaveModal(false);
+            setSaveError('');
+          }}
+          style={{
+            padding: '10px 20px',
+            border: '1px solid #d1d5db',
+            borderRadius: '4px',
+            backgroundColor: '#f3f4f6',
+            cursor: 'pointer',
+            fontSize: '14px'
+          }}
+        >
+          Anulează
+        </button>
+        <button
+          onClick={confirmSave}
+          style={{
+            padding: '10px 20px',
+            border: 'none',
+            borderRadius: '4px',
+            backgroundColor: '#7c3aed',
+            color: 'white',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '500'
+          }}
+        >
+          Salvează
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
