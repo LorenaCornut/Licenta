@@ -162,6 +162,197 @@ function buildOrthogonalPathThroughWaypoints(waypoints) {
   return pathStr;
 }
 
+// Helper: calculează distanța de la un punct la un segment
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), projX: x1, projY: y1, t: 0 };
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return { dist: Math.hypot(px - projX, py - projY), projX, projY, t };
+}
+
+// ============ ROUTING HELPER FUNCTIONS ============
+
+/**
+ * Get bounding box of an element
+ */
+function getElementBounds(el) {
+  return {
+    x: el.x,
+    y: el.y,
+    width: el.width || 150,
+    height: el.height || 100
+  };
+}
+
+/**
+ * Check if a line segment intersects with a rectangle
+ */
+function lineIntersectsRect(x1, y1, x2, y2, rect) {
+  const left = rect.x - 10;
+  const right = rect.x + rect.width + 10;
+  const top = rect.y - 10;
+  const bottom = rect.y + rect.height + 10;
+
+  const p1Inside = x1 >= left && x1 <= right && y1 >= top && y1 <= bottom;
+  const p2Inside = x2 >= left && x2 <= right && y2 >= top && y2 <= bottom;
+  
+  if (p1Inside || p2Inside) return true;
+
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, right, top)) return true;
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, bottom, right, bottom)) return true;
+  if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, left, bottom)) return true;
+  if (lineSegmentsIntersect(x1, y1, x2, y2, right, top, right, bottom)) return true;
+
+  return false;
+}
+
+/**
+ * Check if two line segments intersect
+ */
+function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const ccw = (ax, ay, bx, by, cx, cy) => {
+    return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax);
+  };
+
+  return ccw(x1, y1, x3, y3, x4, y4) !== ccw(x2, y2, x3, y3, x4, y4) &&
+         ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
+}
+
+/**
+ * Find path around obstacles with orthogonal routing
+ */
+function findPathAroundObstacles(x1, y1, x2, y2, elements, excludeIds = [], targetEdge = null) {
+  const path = [{ x: x1, y: y1 }];
+  
+  const obstacles = elements
+    .filter(el => !excludeIds.includes(el.id))
+    .map(el => getElementBounds(el));
+
+  let directPathClear = true;
+  for (const obstacle of obstacles) {
+    if (lineIntersectsRect(x1, y1, x2, y2, obstacle)) {
+      directPathClear = false;
+      break;
+    }
+  }
+
+  if (directPathClear) {
+    // Direct path is clear - use Manhattan routing with perpendicular approach
+    if (targetEdge === 'top' || targetEdge === 'bottom') {
+      path.push({ x: x2, y: y1 });
+      path.push({ x: x2, y: y2 });
+    } else if (targetEdge === 'left' || targetEdge === 'right') {
+      path.push({ x: x1, y: y2 });
+      path.push({ x: x2, y: y2 });
+    } else {
+      const midX = x1 + (x2 - x1) * 0.5;
+      path.push({ x: midX, y: y1 });
+      path.push({ x: midX, y: y2 });
+      path.push({ x: x2, y: y2 });
+    }
+    return path;
+  }
+
+  // Obstacles in the way - route around them
+  const blockingObstacles = obstacles.filter(obs => lineIntersectsRect(x1, y1, x2, y2, obs));
+  
+  if (blockingObstacles.length === 0) {
+    const midX = x1 + (x2 - x1) * 0.5;
+    path.push({ x: midX, y: y1 });
+    path.push({ x: midX, y: y2 });
+    path.push({ x: x2, y: y2 });
+    return path;
+  }
+
+  // Find closest obstacle
+  const closestObstacle = blockingObstacles.reduce((closest, obs) => {
+    const distToStart = Math.hypot(
+      (obs.x + obs.width / 2) - x1,
+      (obs.y + obs.height / 2) - y1
+    );
+    const closestDist = Math.hypot(
+      (closest.x + closest.width / 2) - x1,
+      (closest.y + closest.height / 2) - y1
+    );
+    return distToStart < closestDist ? obs : closest;
+  });
+
+  const padding = 20;
+  const strategies = [];
+
+  // Try different routing strategies
+  strategies.push({ 
+    route: [
+      { x: closestObstacle.x + closestObstacle.width + padding, y: y1 },
+      { x: closestObstacle.x + closestObstacle.width + padding, y: y2 }
+    ]
+  });
+
+  strategies.push({
+    route: [
+      { x: closestObstacle.x - padding, y: y1 },
+      { x: closestObstacle.x - padding, y: y2 }
+    ]
+  });
+
+  strategies.push({
+    route: [
+      { x: x1, y: closestObstacle.y - padding },
+      { x: x2, y: closestObstacle.y - padding }
+    ]
+  });
+
+  strategies.push({
+    route: [
+      { x: x1, y: closestObstacle.y + closestObstacle.height + padding },
+      { x: x2, y: closestObstacle.y + closestObstacle.height + padding }
+    ]
+  });
+
+  let bestRoute = strategies[0].route;
+  
+  for (const strategy of strategies) {
+    let routeValid = true;
+    for (let i = 0; i < strategy.route.length; i++) {
+      const segStart = i === 0 ? { x: x1, y: y1 } : strategy.route[i - 1];
+      const segEnd = strategy.route[i];
+      
+      if (lineIntersectsRect(segStart.x, segStart.y, segEnd.x, segEnd.y, closestObstacle)) {
+        routeValid = false;
+        break;
+      }
+    }
+    
+    if (routeValid) {
+      bestRoute = strategy.route;
+      break;
+    }
+  }
+
+  for (const wp of bestRoute) {
+    path.push(wp);
+  }
+  
+  // Add perpendicular approach to target edge
+  const lastWaypoint = bestRoute[bestRoute.length - 1];
+  
+  if (targetEdge === 'top' || targetEdge === 'bottom') {
+    if (Math.abs(lastWaypoint.x - x2) > 1) {
+      path.push({ x: x2, y: lastWaypoint.y });
+    }
+  } else if (targetEdge === 'left' || targetEdge === 'right') {
+    if (Math.abs(lastWaypoint.y - y2) > 1) {
+      path.push({ x: lastWaypoint.x, y: y2 });
+    }
+  }
+  
+  path.push({ x: x2, y: y2 });
+  return path;
+}
+
 const ensureConnectionOffsets = (conns) => {
   return conns.map(conn => ({
     ...conn,
@@ -300,6 +491,8 @@ export default function CompositeStructureDiagramEditor() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveDialogTitle, setSaveDialogTitle] = useState('');
   const [saveError, setSaveError] = useState('');
+
+  const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
 
   const loadDiagram = async (id) => {
   setIsLoading(true);
@@ -594,6 +787,94 @@ export default function CompositeStructureDiagramEditor() {
     setDraggingEndpoint({ connId, endpointType });
   };
 
+  // Adaugă punct intermediar pe muchie la dublu-click
+const handleEdgeDoubleClick = (e, connection) => {
+  if (!connection) return;
+  const canvas = canvasRef.current;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  const fromEl = elements.find(el => el.id === connection.from);
+  const toEl = elements.find(el => el.id === connection.to);
+  if (!fromEl || !toEl) return;
+  
+  const fromPt = getPointAtOffsetOnEdge(fromEl, connection.fromEdge || 'right', connection.fromOffset);
+  const toPt = getPointAtOffsetOnEdge(toEl, connection.toEdge || 'left', connection.toOffset);
+  const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : (connection.waypoints || []);
+  
+  // Construiește segmente din waypoints: start -> pct1 -> pct2 -> ... -> end
+  const segmentPoints = [fromPt, ...userWps, toPt];
+  let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+  
+  for (let i = 0; i < segmentPoints.length - 1; i++) {
+    const { dist, projX, projY } = distanceToSegment(x, y, segmentPoints[i].x, segmentPoints[i].y, segmentPoints[i+1].x, segmentPoints[i+1].y);
+    if (dist < minDist) {
+      minDist = dist;
+      insertIdx = i;
+      bestProj = { x: projX, y: projY };
+    }
+  }
+  
+  // Adaugă punctul la poziția corectă în user waypoints
+  const newConnections = connections.map(c => {
+    if (c.id !== connection.id) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+    newWps.splice(insertIdx, 0, bestProj);
+    return { ...c, controlPoints: newWps, waypoints: undefined };
+  });
+  setConnections(newConnections);
+};
+
+// Drag waypoint
+const handleWaypointMouseDown = (e, connectionId, idx) => {
+  e.stopPropagation();
+  setDraggingWaypoint({ connectionId, idx });
+};
+
+// Șterge waypoint la Alt+click
+const handleWaypointClick = (e, connectionId, idx) => {
+  if (!e.altKey) return;
+  setConnections(connections => connections.map(c => {
+    if (c.id !== connectionId) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+    newWps.splice(idx, 1);
+    return { ...c, controlPoints: newWps, waypoints: undefined };
+  }));
+};
+
+  // Returnează waypoints cu rutare automată de evitare a obstacolelor
+function getConnectionWaypoints(connection) {
+  const fromEl = elements.find(el => el.id === connection.from);
+  const toEl = elements.find(el => el.id === connection.to);
+  if (!fromEl || !toEl) return [];
+  
+  const fromPt = getPointAtOffsetOnEdge(fromEl, connection.fromEdge || 'right', connection.fromOffset);
+  const toPt = getPointAtOffsetOnEdge(toEl, connection.toEdge || 'left', connection.toOffset);
+  const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : (connection.waypoints || []);
+  
+  // Dacă nu există puncte intermediare utilizator, folosește rutarea completă
+  if (userWps.length === 0) {
+    return findPathAroundObstacles(
+      fromPt.x, fromPt.y, toPt.x, toPt.y,
+      elements, [connection.from, connection.to], connection.toEdge || 'left'
+    );
+  }
+  
+  // Altfel, rutează fiecare segment între puncte fixe
+  const allPoints = [fromPt, ...userWps, toPt];
+  let result = [allPoints[0]];
+  for (let i = 0; i < allPoints.length - 1; i++) {
+    const seg = findPathAroundObstacles(
+      allPoints[i].x, allPoints[i].y, allPoints[i+1].x, allPoints[i+1].y,
+      elements, [connection.from, connection.to],
+      (i === allPoints.length - 2) ? (connection.toEdge || 'left') : null
+    );
+    result = result.concat(seg.slice(1));
+  }
+  return result;
+}
+
   useEffect(() => {
     if (draggingEndpoint) {
       window.addEventListener('mousemove', handleEndpointDrag);
@@ -764,12 +1045,42 @@ const confirmSave = async () => {
     fileInputRef.current?.click();
   };
 
-  useEffect(() => {
+  
   const handleImportFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     // <-- Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+      window.location.href = '/login';
+      return;
+    }
+
+    try {
+      const content = await file.text();
+      const data = JSON.parse(content);
+      if (data.elements && data.connections) {
+        setElements(data.elements);
+        setConnections(ensureConnectionOffsets(data.connections));
+        setTitle(data.title || 'Imported Diagram');
+        setSelectedElement(null);
+        setSelectedConnection(null);
+        alert('✅ Diagram imported successfully!');
+      }
+    } catch (error) {
+      alert('Error importing file');
+    }
+  };
+
+  // Handle dragging waypoints
+// useEffect pentru import (rămâne separat)
+useEffect(() => {
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     const token = localStorage.getItem('token');
     if (!token) {
       alert('Trebuie să fii autentificat pentru a importa o diagramă!');
@@ -799,6 +1110,34 @@ const confirmSave = async () => {
     return () => input.removeEventListener('change', handleImportFile);
   }
 }, []);
+
+// useEffect pentru dragging waypoints (SEPARAT, ÎN AFARA CELUILALT)
+useEffect(() => {
+  if (!draggingWaypoint) return;
+  const handleMove = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const newX = e.clientX - rect.left;
+    const newY = e.clientY - rect.top;
+    
+    setConnections(connections => connections.map(c => {
+      if (c.id !== draggingWaypoint.connectionId) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+      newWps[draggingWaypoint.idx] = { x: newX, y: newY };
+      return { ...c, controlPoints: newWps, waypoints: undefined };
+    }));
+  };
+  const handleUp = () => {
+    setDraggingWaypoint(null);
+  };
+  window.addEventListener('mousemove', handleMove);
+  window.addEventListener('mouseup', handleUp);
+  return () => {
+    window.removeEventListener('mousemove', handleMove);
+    window.removeEventListener('mouseup', handleUp);
+  };
+}, [draggingWaypoint, connections]);
 
   return (
     <div className="uml-editor" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -954,23 +1293,43 @@ const confirmSave = async () => {
               const toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'left', conn.toOffset);
               const isSelected = selectedConnection === conn.id;
               
-              const waypoints = [
-                fromPoint,
-                ...(conn.controlPoints || conn.waypoints || []),
-                toPoint
-              ];
+              // Folosește rutarea automată cu evitare obstacole
+let waypoints;
+// Verifică dacă există puncte intermediare definite de utilizator
+const userWps = Array.isArray(conn.controlPoints) ? conn.controlPoints : (conn.waypoints || []);
+
+if (userWps.length === 0) {
+  // Fără puncte intermediare - folosește rutarea automată completă
+  waypoints = findPathAroundObstacles(
+    fromPoint.x, fromPoint.y, toPoint.x, toPoint.y,
+    elements, [conn.from, conn.to], conn.toEdge || 'left'
+  );
+} else {
+  // Cu puncte intermediare - rutează fiecare segment
+  const allPoints = [fromPoint, ...userWps, toPoint];
+  waypoints = [allPoints[0]];
+  for (let i = 0; i < allPoints.length - 1; i++) {
+    const seg = findPathAroundObstacles(
+      allPoints[i].x, allPoints[i].y, allPoints[i+1].x, allPoints[i+1].y,
+      elements, [conn.from, conn.to],
+      (i === allPoints.length - 2) ? (conn.toEdge || 'left') : null
+    );
+    waypoints = waypoints.concat(seg.slice(1));
+  }
+}
               
               const pathD = buildOrthogonalPathThroughWaypoints(waypoints);
 
               return (
                 <g key={conn.id} onClick={(e) => { e.stopPropagation(); handleConnectionClick(conn.id); }} style={{ cursor: 'pointer' }}>
                   <path
-                    d={pathD}
-                    stroke="transparent"
-                    strokeWidth={8}
-                    fill="none"
-                    pointerEvents="auto"
-                  />
+  d={pathD}
+  stroke="transparent"
+  strokeWidth={8}
+  fill="none"
+  pointerEvents="auto"
+  onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
+/>
                   <path
                     d={pathD}
                     stroke={isSelected ? '#f00' : '#333'}
@@ -1033,6 +1392,23 @@ const confirmSave = async () => {
                       />
                     </>
                   )}
+                  {/* Waypoint circles */}
+{Array.isArray(conn.controlPoints) && conn.controlPoints.map((wp, idx) => (
+  <circle
+    key={`wp-${idx}`}
+    cx={wp.x}
+    cy={wp.y}
+    r={7}
+    fill="#fff"
+    stroke="#9168b7"
+    strokeWidth={2}
+    onMouseDown={e => handleWaypointMouseDown(e, conn.id, idx)}
+    onClick={e => handleWaypointClick(e, conn.id, idx)}
+    onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
+    style={{ cursor: 'pointer' }}
+    title="Drag to move, Alt+click to delete"
+  />
+))}
                 </g>
               );
             })}
