@@ -17,27 +17,27 @@ function waypointsToPath(points) {
 function detectConnectionPointOnContour(e, element) {
   const canvas = document.querySelector('.uml-canvas');
   if (!canvas) return { x: element.x, y: element.y, point: 'top' };
-  
+
   const canvasRect = canvas.getBoundingClientRect();
   const elementDOM = e.currentTarget;
   const elementRect = elementDOM.getBoundingClientRect();
-  
+
   const clickCanvasX = e.clientX - canvasRect.left;
   const clickCanvasY = e.clientY - canvasRect.top;
   const elCanvasX = elementRect.left - canvasRect.left;
   const elCanvasY = elementRect.top - canvasRect.top;
   const elWidth = elementRect.width;
   const elHeight = elementRect.height;
-  
+
   const distTop = Math.abs(clickCanvasY - elCanvasY);
   const distBottom = Math.abs(clickCanvasY - (elCanvasY + elHeight));
   const distLeft = Math.abs(clickCanvasX - elCanvasX);
   const distRight = Math.abs(clickCanvasX - (elCanvasX + elWidth));
-  
+
   const minDist = Math.min(distTop, distBottom, distLeft, distRight);
-  
+
   let pointX, pointY, edgeType;
-  
+
   if (minDist === distTop) {
     pointX = Math.max(elCanvasX, Math.min(clickCanvasX, elCanvasX + elWidth));
     pointY = elCanvasY;
@@ -55,7 +55,7 @@ function detectConnectionPointOnContour(e, element) {
     pointY = Math.max(elCanvasY, Math.min(clickCanvasY, elCanvasY + elHeight));
     edgeType = 'right';
   }
-  
+
   return { x: pointX, y: pointY, point: edgeType };
 }
 
@@ -64,7 +64,7 @@ function getConnectionPointOnElement(element, edgeType) {
   let x, y;
   const centerX = element.x + element.width / 2;
   const centerY = element.y + element.height / 2;
-  
+
   if (edgeType === 'top') {
     x = centerX;
     y = element.y;
@@ -82,7 +82,7 @@ function getConnectionPointOnElement(element, edgeType) {
     x = centerX;
     y = centerY;
   }
-  
+
   return { x, y };
 }
 
@@ -90,7 +90,7 @@ function getConnectionPointOnElement(element, edgeType) {
 function getPointAtOffsetOnEdge(element, edgeType, offset) {
   offset = Math.max(0, Math.min(1, offset)); // Clamp 0-1
   let x, y;
-  
+
   if (edgeType === 'top') {
     x = element.x + element.width * offset;
     y = element.y;
@@ -107,7 +107,7 @@ function getPointAtOffsetOnEdge(element, edgeType, offset) {
     x = element.x + element.width / 2;
     y = element.y + element.height / 2;
   }
-  
+
   return { x, y };
 }
 
@@ -119,10 +119,10 @@ function getClosestPointOnContour(element, pointX, pointY) {
     { edge: 'left', x: element.x, y: Math.max(element.y, Math.min(pointY, element.y + element.height)) },
     { edge: 'right', x: element.x + element.width, y: Math.max(element.y, Math.min(pointY, element.y + element.height)) }
   ];
-  
+
   let closest = candidates[0];
   let minDist = Math.hypot(closest.x - pointX, closest.y - pointY);
-  
+
   for (let c of candidates) {
     const dist = Math.hypot(c.x - pointX, c.y - pointY);
     if (dist < minDist) {
@@ -130,7 +130,7 @@ function getClosestPointOnContour(element, pointX, pointY) {
       closest = c;
     }
   }
-  
+
   // Calculate offset along the edge (0-1)
   let offset = 0;
   if (closest.edge === 'top' || closest.edge === 'bottom') {
@@ -138,7 +138,7 @@ function getClosestPointOnContour(element, pointX, pointY) {
   } else {
     offset = (closest.y - element.y) / element.height;
   }
-  
+
   return { edge: closest.edge, offset };
 }
 
@@ -151,14 +151,14 @@ function checkElementCollision(newEl, existingElements, excludeId = null) {
     if (excludeId && el.id === excludeId) continue;
     // SYSTEM_BOUNDARY is ignored - it can overlap with anything
     if (el.type === 'SYSTEM_BOUNDARY' || newEl.type === 'SYSTEM_BOUNDARY') continue;
-    
+
     // Check if rectangles overlap
-    const noCollision = 
+    const noCollision =
       newEl.x + newEl.width < el.x ||
       el.x + el.width < newEl.x ||
       newEl.y + newEl.height < el.y ||
       el.y + el.height < newEl.y;
-    
+
     if (!noCollision) {
       return el; // Return the element it collides with
     }
@@ -178,7 +178,7 @@ function isActorInBoundary(actor, boundary) {
 function canCreateConnection(connectionType, fromElement, toElement) {
   // Include/Extend cannot connect two Actors
   if ((connectionType === 'INCLUDE' || connectionType === 'EXTEND') &&
-      fromElement.type === 'ACTOR' && toElement.type === 'ACTOR') {
+    fromElement.type === 'ACTOR' && toElement.type === 'ACTOR') {
     return false;
   }
   return true;
@@ -201,7 +201,7 @@ function UseCaseDiagramEditor() {
   const navigate = useNavigate();
   const { diagramId } = useParams();
   const canvasRef = useRef(null);
-  
+
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
     return {
@@ -251,7 +251,7 @@ function UseCaseDiagramEditor() {
       const canvasRect = canvasRef.current.getBoundingClientRect();
       const newX = Math.max(0, e.clientX - canvasRect.left - dragOffset.x);
       const newY = Math.max(0, e.clientY - canvasRect.top - dragOffset.y);
-      
+
       const draggingEl = elements.find(el => el.id === draggingElement);
       if (!draggingEl) return;
 
@@ -273,8 +273,8 @@ function UseCaseDiagramEditor() {
           }
         }
       }
-      
-      setElements(elements.map(el => 
+
+      setElements(elements.map(el =>
         el.id === draggingElement ? tentativeEl : el
       ));
     };
@@ -303,7 +303,7 @@ function UseCaseDiagramEditor() {
         setExportDropdownOpen(false);
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [connectionMode, exportDropdownOpen]);
@@ -315,15 +315,15 @@ function UseCaseDiagramEditor() {
       const { elementId, direction, startX, startY, startWidth, startHeight, startElX, startElY } = resizing;
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
-      
+
       let newWidth = startWidth;
       let newHeight = startHeight;
       let newX = startElX;
       let newY = startElY;
-      
+
       const minWidth = 80;
       const minHeight = 60;
-      
+
       if (direction.includes('e')) {
         newWidth = Math.max(minWidth, startWidth + deltaX);
       }
@@ -344,17 +344,17 @@ function UseCaseDiagramEditor() {
           newY = startElY + deltaY;
         }
       }
-      
+
       // Create tentative resized element
       const resizingEl = elements.find(el => el.id === elementId);
       const tentativeEl = { ...resizingEl, width: newWidth, height: newHeight, x: Math.max(0, newX), y: Math.max(0, newY) };
-      
+
       // SYSTEM_BOUNDARY has no collision detection - it can overlap with anything
       if (resizingEl.type !== 'SYSTEM_BOUNDARY') {
         // Check collision with other elements
         const collision = checkElementCollision(tentativeEl, elements, elementId);
         if (collision) return; // Don't resize if collision detected
-        
+
         // If it's an Actor, check boundary constraint
         if (resizingEl.type === 'ACTOR') {
           const boundary = elements.find(el => el.type === 'SYSTEM_BOUNDARY');
@@ -364,9 +364,9 @@ function UseCaseDiagramEditor() {
           }
         }
       }
-      
-      setElements(elements.map(el => 
-        el.id === elementId 
+
+      setElements(elements.map(el =>
+        el.id === elementId
           ? { ...el, width: newWidth, height: newHeight, x: Math.max(0, newX), y: Math.max(0, newY) }
           : el
       ));
@@ -395,39 +395,39 @@ function UseCaseDiagramEditor() {
   };
 
   const loadDiagram = async (id) => {
-  setIsLoading(true);
-  try {
-    const apiUrl = process.env.REACT_APP_API_URL || '/api';
-    // <-- ADAUGAT headers
-    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
-      headers: getAuthHeaders()
-    });
-    
-    if (response.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      localStorage.removeItem('username');
-      navigate('/login');
-      return;
+    setIsLoading(true);
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      // <-- ADAUGAT headers
+      const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+        headers: getAuthHeaders()
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        navigate('/login');
+        return;
+      }
+
+      const result = await response.json();
+      console.log('Loaded diagram:', result);
+
+      if (result.diagram?.data) {
+        setTitle(result.diagram.title || 'Use Case Diagram');
+        setElements(result.diagram.data.elements || []);
+        const loadedConnections = result.diagram.data.connections || [];
+        setConnections(ensureConnectionOffsets(loadedConnections));
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
+      }
+    } catch (error) {
+      console.error('Error loading:', error);
+    } finally {
+      setIsLoading(false);
     }
-    
-    const result = await response.json();
-    console.log('Loaded diagram:', result);
-    
-    if (result.diagram?.data) {
-      setTitle(result.diagram.title || 'Use Case Diagram');
-      setElements(result.diagram.data.elements || []);
-      const loadedConnections = result.diagram.data.connections || [];
-      setConnections(ensureConnectionOffsets(loadedConnections));
-      setCurrentDiagramId(id);
-      sessionStorage.setItem('currentDiagramId', id);
-    }
-  } catch (error) {
-    console.error('Error loading:', error);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   const handleSaveName = () => {
     if (editingElement) {
@@ -438,15 +438,15 @@ function UseCaseDiagramEditor() {
 
   const handleElementClick = (e, el) => {
     e.stopPropagation();
-    
+
     if (connectionMode) {
       const clickedPoint = detectConnectionPointOnContour(e, el);
-      
+
       if (!connectionStart) {
         setConnectionStart({ elementId: el.id, point: clickedPoint });
       } else if (connectionStart.elementId !== el.id) {
         const fromEl = elements.find(elem => elem.id === connectionStart.elementId);
-        
+
         // Validate connection type
         if (!canCreateConnection(connectionMode, fromEl, el)) {
           alert('⚠️ Include/Extend can only connect to Use Cases, not between Actors!');
@@ -472,7 +472,7 @@ function UseCaseDiagramEditor() {
           label: label,
           waypoints: []
         };
-        
+
         setConnections([...connections, newConnection]);
         setConnectionMode(null);
         setConnectionStart(null);
@@ -482,7 +482,7 @@ function UseCaseDiagramEditor() {
       }
       return;
     }
-    
+
     setSelectedElement(el.id);
     setEditName(el.name);
   };
@@ -510,7 +510,7 @@ function UseCaseDiagramEditor() {
     e.preventDefault();
     const el = elements.find(e => e.id === elementId);
     if (!el) return;
-    
+
     setResizing({
       elementId,
       direction,
@@ -536,22 +536,22 @@ function UseCaseDiagramEditor() {
 
   const handleEndpointDrag = (e) => {
     if (!draggingEndpoint || !canvasRef.current) return;
-    
+
     const { connId, endpointType } = draggingEndpoint;
     const conn = connections.find(c => c.id === connId);
     if (!conn) return;
-    
+
     const elementId = endpointType === 'from' ? conn.from : conn.to;
     const element = elements.find(e => e.id === elementId);
     if (!element) return;
-    
+
     const canvasRect = canvasRef.current.getBoundingClientRect();
     const pointX = e.clientX - canvasRect.left;
     const pointY = e.clientY - canvasRect.top;
-    
+
     // Find closest point on element contour
     const closest = getClosestPointOnContour(element, pointX, pointY);
-    
+
     // Update connection with new edge and offset
     setConnections(connections.map(c => {
       if (c.id === connId) {
@@ -622,150 +622,150 @@ function UseCaseDiagramEditor() {
   };
 
   const handleSaveToDatabase = async () => {
-  // <-- ADAUGAT: Verifică token-ul
-  const token = localStorage.getItem('token');
-  if (!token) {
-    alert('Trebuie să fii autentificat pentru a salva diagrama!');
-    navigate('/login');
-    return;
-  }
-  
-  const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-  const diagramTitle = activeDiagramId 
-    ? title 
-    : prompt('Introdu numele diagramei:', title || 'Use Case Diagram');
-  
-  if (!diagramTitle) return;
-
-  try {
-    const userId = localStorage.getItem('userId');
-    if (!userId) {
-      alert('Trebuie să fii logat pentru a salva diagrama!');
+    // <-- ADAUGAT: Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a salva diagrama!');
       navigate('/login');
       return;
     }
 
-    const connectionsToSave = ensureConnectionOffsets(connections);
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId
+      ? title
+      : prompt('Introdu numele diagramei:', title || 'Use Case Diagram');
 
-    const diagramData = {
-      diagram: {
-        selectedType: 'USE_CASE',
-        elements: elements,
-        connections: connectionsToSave
-      }
-    };
-
-    const apiUrl = process.env.REACT_APP_API_URL || '/api';
-    let response, result;
-
-    if (activeDiagramId) {
-      // UPDATE existing diagram
-      response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),  // <-- SCHIMBAT
-        body: JSON.stringify(diagramData)
-      });
-      
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('username');
-        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-        navigate('/login');
-        return;
-      }
-      
-      result = await response.json();
-      
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
-        setTitle(diagramTitle);
-      }
-    } else {
-      // CREATE new diagram
-      const newDiagramData = {
-        title: diagramTitle,
-        userId: parseInt(userId),
-        ...diagramData
-      };
-      
-      response = await fetch(`${apiUrl}/class-diagrams`, {
-        method: 'POST',
-        headers: getAuthHeaders(),  // <-- SCHIMBAT
-        body: JSON.stringify(newDiagramData)
-      });
-      
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('username');
-        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-        navigate('/login');
-        return;
-      }
-      
-      result = await response.json();
-      
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-        setCurrentDiagramId(result.diagramId);
-        sessionStorage.setItem('currentDiagramId', result.diagramId);
-        setTitle(diagramTitle);
-      }
-    }
-
-    if (!response.ok) {
-      alert(`Eroare: ${result.error}`);
-    }
-  } catch (error) {
-    console.error('Error saving to database:', error);
-    alert(`Eroare la salvare: ${error.message}`);
-  }
-};
-
-  const handleImport = () => {
-  // <-- Verifică token-ul
-  const token = localStorage.getItem('token');
-  if (!token) {
-    alert('Trebuie să fii autentificat pentru a importa o diagramă!');
-    navigate('/login');
-    return;
-  }
-  
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.json,.svg';
-  fileInput.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    if (!diagramTitle) return;
 
     try {
-      const content = await file.text();
-      
-      if (file.name.endsWith('.json')) {
-        const data = JSON.parse(content);
-        if (data.elements && data.connections) {
-          setElements(data.elements);
-          setConnections(ensureConnectionOffsets(data.connections));
-          setTitle(data.title || 'Imported Diagram');
-          setCurrentDiagramId(null);
-          sessionStorage.removeItem('currentDiagramId');
-          setSelectedElement(null);
-          setSelectedConnection(null);
-          alert('✅ Diagram imported successfully!');
-        } else {
-          alert('❌ Invalid JSON format. Missing elements or connections.');
+      const userId = localStorage.getItem('userId');
+      if (!userId) {
+        alert('Trebuie să fii logat pentru a salva diagrama!');
+        navigate('/login');
+        return;
+      }
+
+      const connectionsToSave = ensureConnectionOffsets(connections);
+
+      const diagramData = {
+        diagram: {
+          selectedType: 'USE_CASE',
+          elements: elements,
+          connections: connectionsToSave
         }
-      } else if (file.name.endsWith('.svg')) {
-        alert('⚠️ SVG import not yet supported. Please use JSON format.');
+      };
+
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      let response, result;
+
+      if (activeDiagramId) {
+        // UPDATE existing diagram
+        response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),  // <-- SCHIMBAT
+          body: JSON.stringify(diagramData)
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('username');
+          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+          navigate('/login');
+          return;
+        }
+
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+          setTitle(diagramTitle);
+        }
+      } else {
+        // CREATE new diagram
+        const newDiagramData = {
+          title: diagramTitle,
+          userId: parseInt(userId),
+          ...diagramData
+        };
+
+        response = await fetch(`${apiUrl}/class-diagrams`, {
+          method: 'POST',
+          headers: getAuthHeaders(),  // <-- SCHIMBAT
+          body: JSON.stringify(newDiagramData)
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('username');
+          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+          navigate('/login');
+          return;
+        }
+
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
+          sessionStorage.setItem('currentDiagramId', result.diagramId);
+          setTitle(diagramTitle);
+        }
+      }
+
+      if (!response.ok) {
+        alert(`Eroare: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error importing file:', error);
-      alert(`❌ Error importing file: ${error.message}`);
+      console.error('Error saving to database:', error);
+      alert(`Eroare la salvare: ${error.message}`);
     }
   };
-  fileInput.click();
-};
+
+  const handleImport = () => {
+    // <-- Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+      navigate('/login');
+      return;
+    }
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json,.svg';
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const content = await file.text();
+
+        if (file.name.endsWith('.json')) {
+          const data = JSON.parse(content);
+          if (data.elements && data.connections) {
+            setElements(data.elements);
+            setConnections(ensureConnectionOffsets(data.connections));
+            setTitle(data.title || 'Imported Diagram');
+            setCurrentDiagramId(null);
+            sessionStorage.removeItem('currentDiagramId');
+            setSelectedElement(null);
+            setSelectedConnection(null);
+            alert('✅ Diagram imported successfully!');
+          } else {
+            alert('❌ Invalid JSON format. Missing elements or connections.');
+          }
+        } else if (file.name.endsWith('.svg')) {
+          alert('⚠️ SVG import not yet supported. Please use JSON format.');
+        }
+      } catch (error) {
+        console.error('Error importing file:', error);
+        alert(`❌ Error importing file: ${error.message}`);
+      }
+    };
+    fileInput.click();
+  };
 
   const escapeXML = (str) => {
     if (!str) return '';
@@ -781,7 +781,7 @@ function UseCaseDiagramEditor() {
     const padding = 60;
     const allX = elements.map(el => [el.x, el.x + (el.width || 120)]).flat();
     const allY = elements.map(el => [el.y, el.y + (el.height || 100)]).flat();
-    
+
     const minX = Math.min(...allX, 0) - padding;
     const minY = Math.min(...allY, 0) - padding;
     const maxX = Math.max(...allX, 800) + padding;
@@ -813,7 +813,7 @@ function UseCaseDiagramEditor() {
       const toOffset = typeof conn.toOffset !== 'undefined' ? conn.toOffset : 0.5;
       const fromPoint = getPointAtOffsetOnEdge(fromEl, conn.fromEdge || 'top', fromOffset);
       const toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'top', toOffset);
-      
+
       const startX = fromPoint.x;
       const startY = fromPoint.y;
       const endX = toPoint.x;
@@ -831,7 +831,7 @@ function UseCaseDiagramEditor() {
       }
 
       svg += `<line x1='${startX}' y1='${startY}' x2='${endX}' y2='${endY}' stroke='#333' stroke-width='${strokeWidth}' stroke-dasharray='${strokeDasharray}' marker-end='${marker}' stroke-linecap='round' stroke-linejoin='round' />\n`;
-      
+
       // Add label in middle
       if (conn.label && conn.type !== 'ASSOCIATION') {
         const midX = (startX + endX) / 2 + 10;
@@ -844,7 +844,7 @@ function UseCaseDiagramEditor() {
     elements.forEach((el) => {
       const centerX = el.x + el.width / 2;
       const centerY = el.y + el.height / 2;
-      
+
       if (el.type === 'ACTOR') {
         const iconTop = el.y + 10;
         svg += `<g>\n`;
@@ -879,11 +879,11 @@ function UseCaseDiagramEditor() {
   };
 
   const handleExportJSON = () => {
-    const data = JSON.stringify({ 
-      title, 
+    const data = JSON.stringify({
+      title,
       selectedType: 'USE_CASE',
-      elements, 
-      connections 
+      elements,
+      connections
     }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -916,7 +916,7 @@ function UseCaseDiagramEditor() {
   const handleResizeStart = (e, elementId, direction) => {
     e.stopPropagation();
     e.preventDefault();
-    
+
     const el = elements.find(elem => elem.id === elementId);
     if (!el) return;
 
@@ -942,12 +942,12 @@ function UseCaseDiagramEditor() {
           <button className="btn-secondary" onClick={() => setExportDropdownOpen(!exportDropdownOpen)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', zIndex: 999 }}>
             Export ▼
             {exportDropdownOpen && (
-              <div style={{ 
-                position: 'absolute', 
-                top: '100%', 
-                right: 0, 
-                background: 'white', 
-                border: '1px solid #d1d5db', 
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                background: 'white',
+                border: '1px solid #d1d5db',
                 borderRadius: '6px',
                 boxShadow: '0 8px 16px rgba(0,0,0,0.15)',
                 zIndex: 10000,
@@ -955,39 +955,39 @@ function UseCaseDiagramEditor() {
                 marginTop: '6px',
                 overflow: 'hidden'
               }}>
-                <button 
-                  onClick={() => { handleExportSVG(); setExportDropdownOpen(false); }} 
-                  style={{ 
-                    display: 'block', 
-                    width: '100%', 
-                    textAlign: 'left', 
-                    padding: '12px 16px', 
-                    border: 'none', 
-                    background: 'none', 
-                    cursor: 'pointer', 
+                <button
+                  onClick={() => { handleExportSVG(); setExportDropdownOpen(false); }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
                     fontSize: '14px',
                     borderBottom: '1px solid #e5e7eb',
                     transition: 'background 0.2s'
-                  }} 
-                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
+                  }}
+                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'}
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
                   Export SVG
                 </button>
-                <button 
-                  onClick={() => { handleExportJSON(); setExportDropdownOpen(false); }} 
-                  style={{ 
-                    display: 'block', 
-                    width: '100%', 
-                    textAlign: 'left', 
-                    padding: '12px 16px', 
-                    border: 'none', 
-                    background: 'none', 
-                    cursor: 'pointer', 
+                <button
+                  onClick={() => { handleExportJSON(); setExportDropdownOpen(false); }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
                     fontSize: '14px',
                     transition: 'background 0.2s'
-                  }} 
-                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
+                  }}
+                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'}
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
                   Export JSON
@@ -1048,16 +1048,16 @@ function UseCaseDiagramEditor() {
           <svg className="connections-layer" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }}>
             <defs>
               <marker id="arrowAssociation" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
-                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none"/>
+                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none" />
               </marker>
               <marker id="arrowInclude" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
-                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none"/>
+                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none" />
               </marker>
               <marker id="arrowExtend" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
-                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
               <marker id="arrowGeneralization" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
-                <polygon points="0,0 14,7 0,14" fill="white" stroke="#333" strokeWidth="1.5"/>
+                <polygon points="0,0 14,7 0,14" fill="white" stroke="#333" strokeWidth="1.5" />
               </marker>
             </defs>
 
@@ -1072,7 +1072,7 @@ function UseCaseDiagramEditor() {
               const toOffset = typeof conn.toOffset !== 'undefined' ? conn.toOffset : 0.5;
               const fromPoint = getPointAtOffsetOnEdge(fromEl, conn.fromEdge || 'top', fromOffset);
               const toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'top', toOffset);
-              
+
               let startX = fromPoint.x;
               let startY = fromPoint.y;
               let endX = toPoint.x;
@@ -1270,11 +1270,11 @@ function UseCaseDiagramEditor() {
                   }}
                 >
                   <svg width="50" height="60" viewBox="0 0 50 60" style={{ marginBottom: '6px' }}>
-                    <circle cx="25" cy="12" r="8" fill="none" stroke="#333" strokeWidth="1.5"/>
-                    <line x1="25" y1="20" x2="25" y2="35" stroke="#333" strokeWidth="1.5"/>
-                    <line x1="12" y1="27" x2="38" y2="27" stroke="#333" strokeWidth="1.5"/>
-                    <line x1="25" y1="35" x2="10" y2="50" stroke="#333" strokeWidth="1.5"/>
-                    <line x1="25" y1="35" x2="40" y2="50" stroke="#333" strokeWidth="1.5"/>
+                    <circle cx="25" cy="12" r="8" fill="none" stroke="#333" strokeWidth="1.5" />
+                    <line x1="25" y1="20" x2="25" y2="35" stroke="#333" strokeWidth="1.5" />
+                    <line x1="12" y1="27" x2="38" y2="27" stroke="#333" strokeWidth="1.5" />
+                    <line x1="25" y1="35" x2="10" y2="50" stroke="#333" strokeWidth="1.5" />
+                    <line x1="25" y1="35" x2="40" y2="50" stroke="#333" strokeWidth="1.5" />
                   </svg>
                   {!isEditing && <span>{el.name}</span>}
                   {isEditing && (
@@ -1383,7 +1383,7 @@ function UseCaseDiagramEditor() {
           <h3>Properties</h3>
           {selectedElement ? (() => {
             const el = elements.find(e => e.id === selectedElement);
-            
+
             return (
               <div className="properties-panel">
                 <label>Element Name:</label>
@@ -1393,14 +1393,14 @@ function UseCaseDiagramEditor() {
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      setElements(elements.map(el => 
+                      setElements(elements.map(el =>
                         el.id === selectedElement ? { ...el, name: editName } : el
                       ));
                     }
                   }}
                 />
                 <button className="btn-primary" onClick={() => {
-                  setElements(elements.map(el => 
+                  setElements(elements.map(el =>
                     el.id === selectedElement ? { ...el, name: editName } : el
                   ));
                 }}>
@@ -1412,8 +1412,8 @@ function UseCaseDiagramEditor() {
                   {el?.type || 'Unknown'}
                 </div>
 
-                <button 
-                  className="btn-remove" 
+                <button
+                  className="btn-remove"
                   onClick={() => selectedElement && handleDeleteElement(selectedElement)}
                   style={{ marginTop: '12px', width: '100%', backgroundColor: '#ef4444', color: 'white' }}
                 >

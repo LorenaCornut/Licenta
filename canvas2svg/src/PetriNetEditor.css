@@ -454,3 +454,24 @@
     font-size: 12px;
   }
 }
+
+/* ============ RESIZE HANDLES ============ */
+.resize-handle {
+  fill: #ffffff;
+  stroke: #7c3aed;
+  stroke-width: 1.5;
+  transition: fill 0.2s ease, stroke-width 0.2s ease;
+}
+
+.resize-handle:hover {
+  fill: #ede9fe;
+  stroke-width: 2;
+}
+
+.resize-bounding-box {
+  fill: none;
+  stroke: #7c3aed;
+  stroke-width: 1;
+  stroke-dasharray: 4, 4;
+}
+

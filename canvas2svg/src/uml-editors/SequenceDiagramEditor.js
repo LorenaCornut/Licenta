@@ -17,7 +17,7 @@ function waypointsToPath(points) {
 function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
   const ccw = (ax, ay, bx, by, cx, cy) => (cy - ay) * (bx - ax) > (by - ay) * (cx - ax);
   return ccw(x1, y1, x3, y3, x4, y4) !== ccw(x2, y2, x3, y3, x4, y4) &&
-         ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
+    ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
 }
 
 function lineIntersectsRect(x1, y1, x2, y2, rect) {
@@ -38,27 +38,27 @@ function lineIntersectsRect(x1, y1, x2, y2, rect) {
 function detectConnectionPointOnContour(e, element) {
   const canvas = document.querySelector('.uml-canvas');
   if (!canvas) return { x: element.x, y: element.y, point: 'top' };
-  
+
   const canvasRect = canvas.getBoundingClientRect();
   const elementDOM = e.currentTarget;
   const elementRect = elementDOM.getBoundingClientRect();
-  
+
   const clickCanvasX = e.clientX - canvasRect.left;
   const clickCanvasY = e.clientY - canvasRect.top;
   const elCanvasX = elementRect.left - canvasRect.left;
   const elCanvasY = elementRect.top - canvasRect.top;
   const elWidth = elementRect.width;
   const elHeight = elementRect.height;
-  
+
   const distTop = Math.abs(clickCanvasY - elCanvasY);
   const distBottom = Math.abs(clickCanvasY - (elCanvasY + elHeight));
   const distLeft = Math.abs(clickCanvasX - elCanvasX);
   const distRight = Math.abs(clickCanvasX - (elCanvasX + elWidth));
-  
+
   const minDist = Math.min(distTop, distBottom, distLeft, distRight);
-  
+
   let pointX, pointY, edgeType;
-  
+
   if (minDist === distTop) {
     pointX = Math.max(elCanvasX, Math.min(clickCanvasX, elCanvasX + elWidth));
     pointY = elCanvasY;
@@ -76,7 +76,7 @@ function detectConnectionPointOnContour(e, element) {
     pointY = Math.max(elCanvasY, Math.min(clickCanvasY, elCanvasY + elHeight));
     edgeType = 'right';
   }
-  
+
   return { x: pointX, y: pointY, point: edgeType };
 }
 
@@ -116,7 +116,7 @@ function SequenceDiagramEditor() {
       ...(token && { 'Authorization': `Bearer ${token}` })
     };
   };
-  
+
   const [title, setTitle] = useState('Sequence Diagram');
   const [currentDiagramId, setCurrentDiagramId] = useState(null);
   const [elements, setElements] = useState([]);
@@ -158,8 +158,8 @@ function SequenceDiagramEditor() {
       const canvasRect = canvasRef.current.getBoundingClientRect();
       const newX = Math.max(0, e.clientX - canvasRect.left - dragOffset.x);
       const newY = Math.max(0, e.clientY - canvasRect.top - dragOffset.y);
-      
-      setElements(elements.map(el => 
+
+      setElements(elements.map(el =>
         el.id === draggingElement ? { ...el, x: newX, y: newY } : el
       ));
     };
@@ -188,7 +188,7 @@ function SequenceDiagramEditor() {
         setExportDropdownOpen(false);
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [connectionMode, exportDropdownOpen]);
@@ -211,10 +211,10 @@ function SequenceDiagramEditor() {
       setConnections(connections.map(c =>
         c.id === ref.connectionId
           ? {
-              ...c,
-              fromPoint: { ...c.fromPoint, y: newFromY },
-              toPoint: { ...c.toPoint, y: newToY }
-            }
+            ...c,
+            fromPoint: { ...c.fromPoint, y: newFromY },
+            toPoint: { ...c.toPoint, y: newToY }
+          }
           : c
       ));
     };
@@ -236,20 +236,20 @@ function SequenceDiagramEditor() {
   useEffect(() => {
     const handleResizeMove = (e) => {
       if (!resizing) return;
-      
+
       const { elementId, direction, startX, startY, startWidth, startHeight, startElX, startElY } = resizing;
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
-      
+
       let newWidth = startWidth;
       let newHeight = startHeight;
       let newX = startElX;
       let newY = startElY;
-      
+
       const currentEl = elements.find(el => el.id === elementId);
       const minWidth = (currentEl && currentEl.type === 'ACTIVATION') ? 8 : 80;
       const minHeight = 60;
-      
+
       if (direction.includes('e')) {
         newWidth = Math.max(minWidth, startWidth + deltaX);
       }
@@ -270,9 +270,9 @@ function SequenceDiagramEditor() {
           newY = startElY + deltaY;
         }
       }
-      
-      setElements(elements.map(el => 
-        el.id === elementId 
+
+      setElements(elements.map(el =>
+        el.id === elementId
           ? { ...el, width: newWidth, height: newHeight, x: Math.max(0, newX), y: Math.max(0, newY) }
           : el
       ));
@@ -294,36 +294,36 @@ function SequenceDiagramEditor() {
   }, [resizing, elements]);
 
   const loadDiagram = async (id) => {
-  setIsLoading(true);
-  try {
-    const apiUrl = process.env.REACT_APP_API_URL || '/api';
-    // <-- ADAUGAT headers
-    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
-      headers: getAuthHeaders()
-    });
-    
-    if (response.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      localStorage.removeItem('username');
-      navigate('/login');
-      return;
+    setIsLoading(true);
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      // <-- ADAUGAT headers
+      const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+        headers: getAuthHeaders()
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        navigate('/login');
+        return;
+      }
+
+      const result = await response.json();
+      if (result.diagram?.data) {
+        setTitle(result.diagram.title || 'Sequence Diagram');
+        setElements(result.diagram.data.elements || []);
+        setConnections(result.diagram.data.connections || []);
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
+      }
+    } catch (error) {
+      console.error('Error loading:', error);
+    } finally {
+      setIsLoading(false);
     }
-    
-    const result = await response.json();
-    if (result.diagram?.data) {
-      setTitle(result.diagram.title || 'Sequence Diagram');
-      setElements(result.diagram.data.elements || []);
-      setConnections(result.diagram.data.connections || []);
-      setCurrentDiagramId(id);
-      sessionStorage.setItem('currentDiagramId', id);
-    }
-  } catch (error) {
-    console.error('Error loading:', error);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   const handleSaveName = () => {
     if (editingElement) {
@@ -334,11 +334,11 @@ function SequenceDiagramEditor() {
 
   const handleElementClick = (e, el) => {
     e.stopPropagation();
-    
+
     // Handle connection mode
     if (connectionMode) {
       const clickedPoint = detectConnectionPointOnContour(e, el);
-      
+
       if (!connectionStart) {
         // Start connection
         setConnectionStart({ elementId: el.id, point: clickedPoint });
@@ -354,7 +354,7 @@ function SequenceDiagramEditor() {
           label: SEQUENCE_ELEMENTS[connectionMode]?.label || 'Connection',
           waypoints: []
         };
-        
+
         setConnections([...connections, newConnection]);
         setConnectionMode(null);
         setConnectionStart(null);
@@ -374,7 +374,7 @@ function SequenceDiagramEditor() {
             side: 'right',
             waypoints: []
           };
-          
+
           setConnections([...connections, newConnection]);
           setConnectionMode(null);
           setConnectionStart(null);
@@ -386,7 +386,7 @@ function SequenceDiagramEditor() {
       }
       return;
     }
-    
+
     // Normal element selection
     setSelectedElement(el.id);
     setEditName(el.name);
@@ -460,161 +460,161 @@ function SequenceDiagramEditor() {
   };
 
   const handleSaveToDatabase = async () => {
-  // <-- ADAUGAT: Verifică token-ul
-  const token = localStorage.getItem('token');
-  if (!token) {
-    alert('Trebuie să fii autentificat pentru a salva diagrama!');
-    navigate('/login');
-    return;
-  }
-  
-  const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-  const diagramTitle = activeDiagramId
-    ? title
-    : prompt('Introdu numele diagramei:', title || 'Sequence Diagram');
-
-  if (!diagramTitle) return;
-
-  try {
-    const userId = localStorage.getItem('userId');
-    if (!userId) {
-      alert('Trebuie să fii logat pentru a salva diagrama!');
+    // <-- ADAUGAT: Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a salva diagrama!');
       navigate('/login');
       return;
     }
 
-    const diagramData = {
-      diagram: {
-        selectedType: 'SEQUENCE',
-        elements: elements,
-        connections: connections
-      }
-    };
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId
+      ? title
+      : prompt('Introdu numele diagramei:', title || 'Sequence Diagram');
 
-    const apiUrl = process.env.REACT_APP_API_URL || '/api';
-    let response, result;
-
-    if (activeDiagramId) {
-      // UPDATE existing diagram
-      response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),  // <-- SCHIMBAT
-        body: JSON.stringify(diagramData)
-      });
-      
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('username');
-        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-        navigate('/login');
-        return;
-      }
-      
-      result = await response.json();
-
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
-        setTitle(diagramTitle);
-      }
-    } else {
-      // CREATE new diagram
-      const newDiagramData = {
-        title: diagramTitle,
-        userId: parseInt(userId),
-        ...diagramData
-      };
-
-      response = await fetch(`${apiUrl}/class-diagrams`, {
-        method: 'POST',
-        headers: getAuthHeaders(),  // <-- SCHIMBAT
-        body: JSON.stringify(newDiagramData)
-      });
-      
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('username');
-        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-        navigate('/login');
-        return;
-      }
-      
-      result = await response.json();
-
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-        setCurrentDiagramId(result.diagramId);
-        sessionStorage.setItem('currentDiagramId', result.diagramId);
-        setTitle(diagramTitle);
-      }
-    }
-
-    if (!response.ok) {
-      alert(`Eroare: ${result.error}`);
-    }
-  } catch (error) {
-    console.error('Error saving to database:', error);
-    alert(`Eroare la salvare: ${error.message}`);
-  }
-};
-
-  const handleImport = () => {
-  // <-- Verifică token-ul
-  const token = localStorage.getItem('token');
-  if (!token) {
-    alert('Trebuie să fii autentificat pentru a importa o diagramă!');
-    navigate('/login');
-    return;
-  }
-  
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.json,.svg';
-  fileInput.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    if (!diagramTitle) return;
 
     try {
-      const content = await file.text();
-      
-      if (file.name.endsWith('.json')) {
-        const data = JSON.parse(content);
-        if (data.elements && data.connections) {
-          setElements(data.elements);
-          setConnections(data.connections);
-          setTitle(data.title || 'Imported Diagram');
-          setCurrentDiagramId(null);
-          sessionStorage.removeItem('currentDiagramId');
-          setSelectedElement(null);
-          setSelectedConnection(null);
-          alert('✅ Diagram imported successfully!');
-        } else {
-          alert('❌ Invalid JSON format. Missing elements or connections.');
+      const userId = localStorage.getItem('userId');
+      if (!userId) {
+        alert('Trebuie să fii logat pentru a salva diagrama!');
+        navigate('/login');
+        return;
+      }
+
+      const diagramData = {
+        diagram: {
+          selectedType: 'SEQUENCE',
+          elements: elements,
+          connections: connections
         }
-      } else if (file.name.endsWith('.svg')) {
-        alert('⚠️ SVG import not yet supported. Please use JSON format.');
+      };
+
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      let response, result;
+
+      if (activeDiagramId) {
+        // UPDATE existing diagram
+        response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),  // <-- SCHIMBAT
+          body: JSON.stringify(diagramData)
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('username');
+          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+          navigate('/login');
+          return;
+        }
+
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+          setTitle(diagramTitle);
+        }
+      } else {
+        // CREATE new diagram
+        const newDiagramData = {
+          title: diagramTitle,
+          userId: parseInt(userId),
+          ...diagramData
+        };
+
+        response = await fetch(`${apiUrl}/class-diagrams`, {
+          method: 'POST',
+          headers: getAuthHeaders(),  // <-- SCHIMBAT
+          body: JSON.stringify(newDiagramData)
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('username');
+          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+          navigate('/login');
+          return;
+        }
+
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
+          sessionStorage.setItem('currentDiagramId', result.diagramId);
+          setTitle(diagramTitle);
+        }
+      }
+
+      if (!response.ok) {
+        alert(`Eroare: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error importing file:', error);
-      alert(`❌ Error importing file: ${error.message}`);
+      console.error('Error saving to database:', error);
+      alert(`Eroare la salvare: ${error.message}`);
     }
   };
-  fileInput.click();
-};
+
+  const handleImport = () => {
+    // <-- Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+      navigate('/login');
+      return;
+    }
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json,.svg';
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const content = await file.text();
+
+        if (file.name.endsWith('.json')) {
+          const data = JSON.parse(content);
+          if (data.elements && data.connections) {
+            setElements(data.elements);
+            setConnections(data.connections);
+            setTitle(data.title || 'Imported Diagram');
+            setCurrentDiagramId(null);
+            sessionStorage.removeItem('currentDiagramId');
+            setSelectedElement(null);
+            setSelectedConnection(null);
+            alert('✅ Diagram imported successfully!');
+          } else {
+            alert('❌ Invalid JSON format. Missing elements or connections.');
+          }
+        } else if (file.name.endsWith('.svg')) {
+          alert('⚠️ SVG import not yet supported. Please use JSON format.');
+        }
+      } catch (error) {
+        console.error('Error importing file:', error);
+        alert(`❌ Error importing file: ${error.message}`);
+      }
+    };
+    fileInput.click();
+  };
 
   const generateFullSVG = () => {
     const padding = 60;
     const allX = elements.map(el => [el.x, el.x + (el.width || 120)]).flat();
     const allY = elements.map(el => [el.y, el.y + (el.height || 100)]).flat();
-    
+
     // Calculate all Y coordinates including lifelines and messages
     let allYLifelines = [...allY];
     connections.forEach(conn => {
       if (conn.fromPoint?.y) allYLifelines.push(conn.fromPoint.y);
       if (conn.toPoint?.y) allYLifelines.push(conn.toPoint.y);
     });
-    
+
     const minX = Math.min(...allX, 0) - padding;
     const minY = Math.min(...allY, 0) - padding;
     const maxX = Math.max(...allX, 800) + padding;
@@ -645,7 +645,7 @@ function SequenceDiagramEditor() {
     elements.forEach((el) => {
       const isFrame = ['ALT', 'LOOP', 'OPT', 'PAR', 'REF'].includes(el.type);
       if (!isFrame) return;
-      
+
       svg += `<rect x='${el.x}' y='${el.y}' width='${el.width}' height='${el.height}' fill='none' stroke='#a78bfa' stroke-width='2' stroke-dasharray='none' />\n`;
       svg += `<text x='${el.x + 6}' y='${el.y + 14}' class='frame-label'>${el.type}</text>\n`;
     });
@@ -671,7 +671,7 @@ function SequenceDiagramEditor() {
       const startX = fromEl.x + fromEl.width / 2;
       const endX = toEl.x + toEl.width / 2;
       let startY = conn.fromPoint?.y !== undefined ? conn.fromPoint.y : fromEl.y + fromEl.height;
-      
+
       // Pentru self-message, endY trebuie să fie mai jos pentru a vedea buclă
       let endY;
       if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
@@ -711,7 +711,7 @@ function SequenceDiagramEditor() {
     connections.forEach((conn) => {
       const fromEl = elements.find(e => e.id === conn.from);
       if (!fromEl) return;
-      
+
       // Activation bars DOAR pe self-messages
       if (conn.type === 'SELF_MESSAGE' && conn.from === conn.to) {
         const startY = conn.fromPoint?.y || fromEl.y + fromEl.height;
@@ -730,7 +730,7 @@ function SequenceDiagramEditor() {
       const isControl = el.type === 'CONTROL';
       const isEntity = el.type === 'ENTITY';
       const isSequenceParticipant = ['ACTOR', 'OBJECT', 'BOUNDARY', 'CONTROL', 'ENTITY'].includes(el.type);
-      
+
       if (!isSequenceParticipant) return;
 
       const centerX = el.x + el.width / 2;
@@ -793,11 +793,11 @@ function SequenceDiagramEditor() {
   };
 
   const handleExportJSON = () => {
-    const data = JSON.stringify({ 
-      title, 
+    const data = JSON.stringify({
+      title,
       selectedType: 'SEQUENCE',
-      elements, 
-      connections 
+      elements,
+      connections
     }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -848,7 +848,7 @@ function SequenceDiagramEditor() {
   const handleResizeStart = (e, elementId, direction) => {
     e.stopPropagation();
     e.preventDefault();
-    
+
     const el = elements.find(elem => elem.id === elementId);
     if (!el) return;
 
@@ -875,7 +875,7 @@ function SequenceDiagramEditor() {
       const endX = toEl.x + toEl.width / 2;
       let startY = conn.fromPoint?.y !== undefined ? conn.fromPoint.y : fromEl.y + fromEl.height / 2;
       let endY = conn.toPoint?.y !== undefined ? conn.toPoint.y : startY;
-      
+
       if (conn.type === 'SELF_MESSAGE') {
         // Self message on side of element
         const side = conn.side || 'right';
@@ -898,12 +898,12 @@ function SequenceDiagramEditor() {
           <button className="btn-secondary" onClick={() => setExportDropdownOpen(!exportDropdownOpen)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', zIndex: 999 }}>
             Export ▼
             {exportDropdownOpen && (
-              <div style={{ 
-                position: 'absolute', 
-                top: '100%', 
-                right: 0, 
-                background: 'white', 
-                border: '1px solid #d1d5db', 
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                background: 'white',
+                border: '1px solid #d1d5db',
                 borderRadius: '6px',
                 boxShadow: '0 8px 16px rgba(0,0,0,0.15)',
                 zIndex: 10000,
@@ -911,39 +911,39 @@ function SequenceDiagramEditor() {
                 marginTop: '6px',
                 overflow: 'hidden'
               }}>
-                <button 
-                  onClick={() => { handleExportSVG(); setExportDropdownOpen(false); }} 
-                  style={{ 
-                    display: 'block', 
-                    width: '100%', 
-                    textAlign: 'left', 
-                    padding: '12px 16px', 
-                    border: 'none', 
-                    background: 'none', 
-                    cursor: 'pointer', 
+                <button
+                  onClick={() => { handleExportSVG(); setExportDropdownOpen(false); }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
                     fontSize: '14px',
                     borderBottom: '1px solid #e5e7eb',
                     transition: 'background 0.2s'
-                  }} 
-                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
+                  }}
+                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'}
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
                   Export SVG
                 </button>
-                <button 
-                  onClick={() => { handleExportJSON(); setExportDropdownOpen(false); }} 
-                  style={{ 
-                    display: 'block', 
-                    width: '100%', 
-                    textAlign: 'left', 
-                    padding: '12px 16px', 
-                    border: 'none', 
-                    background: 'none', 
-                    cursor: 'pointer', 
+                <button
+                  onClick={() => { handleExportJSON(); setExportDropdownOpen(false); }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
                     fontSize: '14px',
                     transition: 'background 0.2s'
-                  }} 
-                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'} 
+                  }}
+                  onMouseEnter={(e) => e.target.style.background = '#f9fafb'}
                   onMouseLeave={(e) => e.target.style.background = 'none'}
                 >
                   Export JSON
@@ -1003,26 +1003,26 @@ function SequenceDiagramEditor() {
           <svg className="connections-layer" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }}>
             <defs>
               <marker id="arrowSyncMessage" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
-                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none"/>
+                <path d="M 0 0 L 14 7 L 0 14 Z" fill="#333" stroke="none" />
               </marker>
               <marker id="arrowAsyncMessage" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
-                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
               <marker id="arrowReturnMessage" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
-                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
             </defs>
-            
+
             {/* LIFELINES */}
             {elements.map((el) => {
               const isSequenceParticipant = ['ACTOR', 'OBJECT', 'BOUNDARY', 'CONTROL', 'ENTITY'].includes(el.type);
               if (!isSequenceParticipant) return null;
-              
+
               const lifelineX = el.x + el.width / 2;
               const lifelineStartY = el.y + el.height;
               const canvasHeight = canvasRef?.current?.getBoundingClientRect().height || 1000;
               const lifelineEndY = canvasHeight;
-              
+
               return (
                 <g key={`lifeline-group-${el.id}`}>
                   <line x1={lifelineX} y1={lifelineStartY} x2={lifelineX} y2={lifelineEndY} stroke="transparent" strokeWidth="12" pointerEvents="stroke" cursor="pointer" style={{ opacity: 0 }} />
@@ -1043,7 +1043,7 @@ function SequenceDiagramEditor() {
               let strokeWidth = selectedConnection === conn.id ? 3 : 2;
               let strokeDasharray = 'none';
               let marker = '';
-              
+
               if (conn.type === 'SYNC_MESSAGE' || conn.type === 'SELF_MESSAGE') marker = 'url(#arrowSyncMessage)';
               else if (conn.type === 'ASYNC_MESSAGE' || conn.type === 'CREATE_MESSAGE') marker = 'url(#arrowAsyncMessage)';
               else if (conn.type === 'RETURN_MESSAGE') { strokeDasharray = '6,6'; marker = 'url(#arrowReturnMessage)'; }
@@ -1054,7 +1054,7 @@ function SequenceDiagramEditor() {
                 const endY = points.endY;
                 const side = conn.side || 'right';
                 const offset = 60;
-                
+
                 // Left or right sided U-shape
                 let selfPath;
                 if (side === 'left') {
@@ -1064,7 +1064,7 @@ function SequenceDiagramEditor() {
                   // Right side: (x, y) -> (x + offset, y) -> (x + offset, endY) -> (x, endY)
                   selfPath = `M ${x} ${y} L ${x + offset} ${y} L ${x + offset} ${endY} L ${x} ${endY}`;
                 }
-                
+
                 return (
                   <g key={conn.id} onClick={(e) => handleConnectionLineClick(e, conn.id)} onDoubleClick={(e) => {
                     e.stopPropagation();
@@ -1088,8 +1088,8 @@ function SequenceDiagramEditor() {
                 return (
                   <g key={conn.id} onClick={(e) => handleConnectionLineClick(e, conn.id)} style={{ cursor: 'pointer' }}>
                     <path d={pathD} fill="none" stroke={stroke} strokeWidth={strokeWidth} />
-                    <line x1={endX - xSize/2} y1={endY - xSize/2} x2={endX + xSize/2} y2={endY + xSize/2} stroke={stroke} strokeWidth={strokeWidth}/>
-                    <line x1={endX - xSize/2} y1={endY + xSize/2} x2={endX + xSize/2} y2={endY - xSize/2} stroke={stroke} strokeWidth={strokeWidth}/>
+                    <line x1={endX - xSize / 2} y1={endY - xSize / 2} x2={endX + xSize / 2} y2={endY + xSize / 2} stroke={stroke} strokeWidth={strokeWidth} />
+                    <line x1={endX - xSize / 2} y1={endY + xSize / 2} x2={endX + xSize / 2} y2={endY - xSize / 2} stroke={stroke} strokeWidth={strokeWidth} />
                   </g>
                 );
               }
@@ -1165,9 +1165,9 @@ function SequenceDiagramEditor() {
                     width: `${el.width || 120}px`,
                     height: `${el.height || 100}px`,
                     backgroundColor: 'transparent',
-                    border: connectionMode 
-                      ? (connectionStart?.elementId === el.id 
-                        ? '3px solid #ec4899' 
+                    border: connectionMode
+                      ? (connectionStart?.elementId === el.id
+                        ? '3px solid #ec4899'
                         : '2px dashed #a78bfa')
                       : isFrame ? '2px solid #a78bfa' : 'none',
                     borderRadius: isFrame ? '2px' : '0px',
@@ -1193,108 +1193,108 @@ function SequenceDiagramEditor() {
                   onMouseLeave={() => connectionMode && setHoveringConnectionElement(null)}
                   className={selectedElement === el.id ? 'selected' : ''}
                 >
-                {isActor && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
-                    <svg width="50" height="80" viewBox="0 0 40 65" style={{ marginTop: 6 }}>
-                      <circle cx="20" cy="10" r="8" fill="#f9d6d6" stroke="#222" strokeWidth="1.5" />
-                      <line x1="20" y1="18" x2="20" y2="40" stroke="#222" strokeWidth="1.5" />
-                      <line x1="4" y1="28" x2="36" y2="28" stroke="#222" strokeWidth="1.5" />
-                      <line x1="20" y1="40" x2="5" y2="60" stroke="#222" strokeWidth="1.5" />
-                      <line x1="20" y1="40" x2="35" y2="60" stroke="#222" strokeWidth="1.5" />
-                    </svg>
-                    {editingElement === el.id ? (
-                      <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 6, textAlign: 'center', width: '90%', fontSize: 14, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
-                    ) : (
-                      <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
-                    )}
-                  </div>
-                )}
-                {isControl && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
-                    <svg width="60" height="80" viewBox="0 0 50 65" style={{ marginTop: 6 }}>
-                      <circle cx="25" cy="30" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
-                      <path d="M 25 8 A 8 8 0 0 1 32 12" fill="none" stroke="#222" strokeWidth="1.5" strokeLinecap="round" />
-                      <polygon points="32,12 35,8 33,18" fill="#222" />
-                    </svg>
-                    {editingElement === el.id ? (
-                      <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 6, textAlign: 'center', width: '90%', fontSize: 14, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
-                    ) : (
-                      <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
-                    )}
-                  </div>
-                )}
-                {isBoundary && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
-                    <svg width="60" height="80" viewBox="0 0 50 65" style={{ marginTop: 6 }}>
-                      <circle cx="30" cy="30" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
-                      <line x1="12" y1="30" x2="18" y2="30" stroke="#222" strokeWidth="1.5" />
-                      <line x1="15" y1="18" x2="15" y2="42" stroke="#222" strokeWidth="1.5" />
-                    </svg>
-                    {editingElement === el.id ? (
-                      <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 6, textAlign: 'center', width: '90%', fontSize: 14, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
-                    ) : (
-                      <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
-                    )}
-                  </div>
-                )}
-                {isEntity && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
-                    <svg width="90" height="95" viewBox="0 0 70 75" style={{ marginTop: 3 }}>
-                      <circle cx="35" cy="25" r="18" fill="none" stroke="#222" strokeWidth="1.5" />
-                      <line x1="17" y1="45" x2="53" y2="45" stroke="#222" strokeWidth="2" />
-                    </svg>
-                    {editingElement === el.id ? (
-                      <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 2, textAlign: 'center', width: '90%', fontSize: 13, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
-                    ) : (
-                      <div style={{ marginTop: 2, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
-                    )}
-                  </div>
-                )}
-                {isObject && (
-                  <div style={{ width: '100%', height: '100%', padding: '6px 4px', border: '2px solid #222', borderRadius: '2px', background: '#ffffff', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
-                    {editingElement === el.id ? (
-                      <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ textAlign: 'center', width: '90%', fontSize: 13, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
-                    ) : (
-                      <div style={{ fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
-                    )}
-                  </div>
-                )}
-                {isActivation && (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px' }}>
-                    <div style={{ 
-                      width: '8px', 
-                      height: '90%', 
-                      background: '#bae6fd', 
-                      border: '1px solid #0284c7',
-                      borderRadius: '2px',
-                      boxShadow: selectedElement === el.id ? 'inset 0 0 5px rgba(226, 72, 153, 0.4)' : 'none'
-                    }} />
-                  </div>
-                )}
-                {isDestroy && (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ fontSize: 44, color: '#7c3aed', fontWeight: 700 }}>✕</div>
-                  </div>
-                )}
-                {isFrame && (
-                  <div style={{ padding: '6px', fontSize: '11px', fontFamily: 'monospace', color: '#7c3aed' }}>
-                    {el.type}
-                  </div>
-                )}
+                  {isActor && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
+                      <svg width="50" height="80" viewBox="0 0 40 65" style={{ marginTop: 6 }}>
+                        <circle cx="20" cy="10" r="8" fill="#f9d6d6" stroke="#222" strokeWidth="1.5" />
+                        <line x1="20" y1="18" x2="20" y2="40" stroke="#222" strokeWidth="1.5" />
+                        <line x1="4" y1="28" x2="36" y2="28" stroke="#222" strokeWidth="1.5" />
+                        <line x1="20" y1="40" x2="5" y2="60" stroke="#222" strokeWidth="1.5" />
+                        <line x1="20" y1="40" x2="35" y2="60" stroke="#222" strokeWidth="1.5" />
+                      </svg>
+                      {editingElement === el.id ? (
+                        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 6, textAlign: 'center', width: '90%', fontSize: 14, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
+                      ) : (
+                        <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
+                      )}
+                    </div>
+                  )}
+                  {isControl && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
+                      <svg width="60" height="80" viewBox="0 0 50 65" style={{ marginTop: 6 }}>
+                        <circle cx="25" cy="30" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
+                        <path d="M 25 8 A 8 8 0 0 1 32 12" fill="none" stroke="#222" strokeWidth="1.5" strokeLinecap="round" />
+                        <polygon points="32,12 35,8 33,18" fill="#222" />
+                      </svg>
+                      {editingElement === el.id ? (
+                        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 6, textAlign: 'center', width: '90%', fontSize: 14, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
+                      ) : (
+                        <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
+                      )}
+                    </div>
+                  )}
+                  {isBoundary && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
+                      <svg width="60" height="80" viewBox="0 0 50 65" style={{ marginTop: 6 }}>
+                        <circle cx="30" cy="30" r="12" fill="none" stroke="#222" strokeWidth="1.5" />
+                        <line x1="12" y1="30" x2="18" y2="30" stroke="#222" strokeWidth="1.5" />
+                        <line x1="15" y1="18" x2="15" y2="42" stroke="#222" strokeWidth="1.5" />
+                      </svg>
+                      {editingElement === el.id ? (
+                        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 6, textAlign: 'center', width: '90%', fontSize: 14, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
+                      ) : (
+                        <div style={{ marginTop: 6, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
+                      )}
+                    </div>
+                  )}
+                  {isEntity && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '100%' }}>
+                      <svg width="90" height="95" viewBox="0 0 70 75" style={{ marginTop: 3 }}>
+                        <circle cx="35" cy="25" r="18" fill="none" stroke="#222" strokeWidth="1.5" />
+                        <line x1="17" y1="45" x2="53" y2="45" stroke="#222" strokeWidth="2" />
+                      </svg>
+                      {editingElement === el.id ? (
+                        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ marginTop: 2, textAlign: 'center', width: '90%', fontSize: 13, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
+                      ) : (
+                        <div style={{ marginTop: 2, fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
+                      )}
+                    </div>
+                  )}
+                  {isObject && (
+                    <div style={{ width: '100%', height: '100%', padding: '6px 4px', border: '2px solid #222', borderRadius: '2px', background: '#ffffff', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
+                      {editingElement === el.id ? (
+                        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveName()} onBlur={handleSaveName} autoFocus style={{ textAlign: 'center', width: '90%', fontSize: 13, color: '#222', fontFamily: 'monospace', border: 'none', background: 'transparent', outline: 'none' }} />
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#222', textAlign: 'center', fontFamily: 'monospace' }}>{el.name}</div>
+                      )}
+                    </div>
+                  )}
+                  {isActivation && (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px' }}>
+                      <div style={{
+                        width: '8px',
+                        height: '90%',
+                        background: '#bae6fd',
+                        border: '1px solid #0284c7',
+                        borderRadius: '2px',
+                        boxShadow: selectedElement === el.id ? 'inset 0 0 5px rgba(226, 72, 153, 0.4)' : 'none'
+                      }} />
+                    </div>
+                  )}
+                  {isDestroy && (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ fontSize: 44, color: '#7c3aed', fontWeight: 700 }}>✕</div>
+                    </div>
+                  )}
+                  {isFrame && (
+                    <div style={{ padding: '6px', fontSize: '11px', fontFamily: 'monospace', color: '#7c3aed' }}>
+                      {el.type}
+                    </div>
+                  )}
 
-                {/* RESIZE HANDLES - INSIDE ELEMENT */}
-                {selectedElement === el.id && (
-                  <>
-                    <div className="resize-handle resize-n" onMouseDown={(e) => handleResizeStart(e, el.id, 'n')} />
-                    <div className="resize-handle resize-s" onMouseDown={(e) => handleResizeStart(e, el.id, 's')} />
-                    <div className="resize-handle resize-e" onMouseDown={(e) => handleResizeStart(e, el.id, 'e')} />
-                    <div className="resize-handle resize-w" onMouseDown={(e) => handleResizeStart(e, el.id, 'w')} />
-                    <div className="resize-handle resize-nw" onMouseDown={(e) => handleResizeStart(e, el.id, 'nw')} />
-                    <div className="resize-handle resize-ne" onMouseDown={(e) => handleResizeStart(e, el.id, 'ne')} />
-                    <div className="resize-handle resize-sw" onMouseDown={(e) => handleResizeStart(e, el.id, 'sw')} />
-                    <div className="resize-handle resize-se" onMouseDown={(e) => handleResizeStart(e, el.id, 'se')} />
-                  </>
-                )}
+                  {/* RESIZE HANDLES - INSIDE ELEMENT */}
+                  {selectedElement === el.id && (
+                    <>
+                      <div className="resize-handle resize-n" onMouseDown={(e) => handleResizeStart(e, el.id, 'n')} />
+                      <div className="resize-handle resize-s" onMouseDown={(e) => handleResizeStart(e, el.id, 's')} />
+                      <div className="resize-handle resize-e" onMouseDown={(e) => handleResizeStart(e, el.id, 'e')} />
+                      <div className="resize-handle resize-w" onMouseDown={(e) => handleResizeStart(e, el.id, 'w')} />
+                      <div className="resize-handle resize-nw" onMouseDown={(e) => handleResizeStart(e, el.id, 'nw')} />
+                      <div className="resize-handle resize-ne" onMouseDown={(e) => handleResizeStart(e, el.id, 'ne')} />
+                      <div className="resize-handle resize-sw" onMouseDown={(e) => handleResizeStart(e, el.id, 'sw')} />
+                      <div className="resize-handle resize-se" onMouseDown={(e) => handleResizeStart(e, el.id, 'se')} />
+                    </>
+                  )}
                 </div>
               </React.Fragment>
             );
@@ -1310,7 +1310,7 @@ function SequenceDiagramEditor() {
           <h3>Properties</h3>
           {selectedElement ? (() => {
             const el = elements.find(e => e.id === selectedElement);
-            
+
             return (
               <div className="properties-panel">
                 <label>Element Name:</label>
@@ -1320,14 +1320,14 @@ function SequenceDiagramEditor() {
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      setElements(elements.map(el => 
+                      setElements(elements.map(el =>
                         el.id === selectedElement ? { ...el, name: editName } : el
                       ));
                     }
                   }}
                 />
                 <button className="btn-primary" onClick={() => {
-                  setElements(elements.map(el => 
+                  setElements(elements.map(el =>
                     el.id === selectedElement ? { ...el, name: editName } : el
                   ));
                 }}>
@@ -1339,8 +1339,8 @@ function SequenceDiagramEditor() {
                   {el?.type || 'Unknown'}
                 </div>
 
-                <button 
-                  className="btn-remove" 
+                <button
+                  className="btn-remove"
                   onClick={() => selectedElement && handleDeleteElement(selectedElement)}
                   style={{ marginTop: '12px', width: '100%', backgroundColor: '#ef4444', color: 'white' }}
                 >

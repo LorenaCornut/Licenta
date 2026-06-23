@@ -39,7 +39,7 @@ function lineIntersectsRect(x1, y1, x2, y2, rect) {
 
   const p1Inside = x1 >= left && x1 <= right && y1 >= top && y1 <= bottom;
   const p2Inside = x2 >= left && x2 <= right && y2 >= top && y2 <= bottom;
-  
+
   if (p1Inside || p2Inside) return true;
 
   if (lineSegmentsIntersect(x1, y1, x2, y2, left, top, right, top)) return true;
@@ -59,7 +59,7 @@ function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
   };
 
   return ccw(x1, y1, x3, y3, x4, y4) !== ccw(x2, y2, x3, y3, x4, y4) &&
-         ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
+    ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
 }
 
 /**
@@ -70,17 +70,17 @@ function buildOrthogonalPathThroughWaypoints(waypoints) {
   if (waypoints.length === 1) {
     return `M ${Math.round(waypoints[0].x)},${Math.round(waypoints[0].y)}`;
   }
-  
+
   const path = [waypoints[0]];
-  
+
   for (let i = 0; i < waypoints.length - 1; i++) {
     const from = waypoints[i];
     const to = waypoints[i + 1];
-    
+
     // L-shaped routing: go horizontal first, then vertical
     const midX = to.x;
     const midY = from.y;
-    
+
     if (midX !== from.x) {
       path.push({ x: midX, y: from.y });
     }
@@ -89,17 +89,17 @@ function buildOrthogonalPathThroughWaypoints(waypoints) {
     }
     path.push(to);
   }
-  
+
   // Remove duplicates
   const cleanPath = [];
   for (const pt of path) {
-    if (cleanPath.length === 0 || 
-        cleanPath[cleanPath.length - 1].x !== pt.x || 
-        cleanPath[cleanPath.length - 1].y !== pt.y) {
+    if (cleanPath.length === 0 ||
+      cleanPath[cleanPath.length - 1].x !== pt.x ||
+      cleanPath[cleanPath.length - 1].y !== pt.y) {
       cleanPath.push(pt);
     }
   }
-  
+
   let d = `M ${Math.round(cleanPath[0].x)},${Math.round(cleanPath[0].y)}`;
   for (let i = 1; i < cleanPath.length; i++) {
     d += ` L ${Math.round(cleanPath[i].x)},${Math.round(cleanPath[i].y)}`;
@@ -220,7 +220,7 @@ function getConnectionPointForElement(element, connectionPoint) {
     const w = element.width || 200;
     const h = element.height || 140;
     const offset = connectionPoint.offset;
-    
+
     switch (connectionPoint.point) {
       case 'top':
         // Offset is from left, clamped to width
@@ -240,7 +240,7 @@ function getConnectionPointForElement(element, connectionPoint) {
         return { x: element.x + w / 2, y: element.y + h / 2 };
     }
   }
-  
+
   // Fallback to center (for backward compatibility with old connections)
   const w = element.width || 200;
   const h = element.height || 140;
@@ -258,17 +258,17 @@ function detectConnectionPointOnContour(e, element) {
   // Get element's actual DOM position from the DIV with data-element-id
   const elementDiv = document.querySelector(`[data-element-id="${element.id}"]`);
   if (!elementDiv) return null;
-  
+
   const elementDOMRect = elementDiv.getBoundingClientRect();
   const canvasRef_local = document.querySelector('.uml-canvas');
   if (!canvasRef_local) return null;
-  
+
   const canvasRect = canvasRef_local.getBoundingClientRect();
-  
+
   // Click position relative to canvas in pixels
   const clickCanvasX = e.clientX - canvasRect.left;
   const clickCanvasY = e.clientY - canvasRect.top;
-  
+
   // Element position and size in canvas coordinate system
   const elLeft = elementDOMRect.left - canvasRect.left;
   const elTop = elementDOMRect.top - canvasRect.top;
@@ -276,18 +276,18 @@ function detectConnectionPointOnContour(e, element) {
   const elHeight = elementDOMRect.height;
   const elRight = elLeft + elWidth;
   const elBottom = elTop + elHeight;
-  
+
   // Calculate signed distances to each edge
   const distToTop = Math.abs(clickCanvasY - elTop);
   const distToBottom = Math.abs(clickCanvasY - elBottom);
   const distToLeft = Math.abs(clickCanvasX - elLeft);
   const distToRight = Math.abs(clickCanvasX - elRight);
-  
+
   // Find minimum distance to determine which edge was clicked
   const minDist = Math.min(distToTop, distToBottom, distToLeft, distToRight);
-  
+
   let edgePoint = null;
-  
+
   // Determine which edge and clamp point to edge boundaries
   // Also store the relative offset on that edge
   if (minDist === distToTop) {
@@ -323,7 +323,7 @@ function detectConnectionPointOnContour(e, element) {
       offset: y - elTop
     };
   }
-  
+
   return edgePoint;
 }
 
@@ -332,92 +332,92 @@ function detectConnectionPointOnContour(e, element) {
 function ClassDiagramEditor() {
   // ...existing code...
   const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
-    // Adaugă punct intermediar pe muchie la dublu-click - doar pe segmentele user waypoints
-    const handleEdgeDoubleClick = (e, connection) => {
-      if (!connection) return;
-      const canvas = canvasRef.current;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      
-      const fromEl = elements.find(el => el.id === connection.from);
-      const toEl = elements.find(el => el.id === connection.to);
-      if (!fromEl || !toEl) return;
-      
-      const fromPt = getConnectionPointForElement(fromEl, connection.fromPoint);
-      const toPt = getConnectionPointForElement(toEl, connection.toPoint);
-      const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
-      
-      // Construiește segmente doar din user waypoints: start -> pct1 -> pct2 -> ... -> end
-      const segmentPoints = [fromPt, ...userWps, toPt];
-      let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
-      
-      for (let i = 0; i < segmentPoints.length - 1; i++) {
-        const { dist, projX, projY } = distanceToSegment(x, y, segmentPoints[i].x, segmentPoints[i].y, segmentPoints[i+1].x, segmentPoints[i+1].y);
-        if (dist < minDist) {
-          minDist = dist;
-          insertIdx = i; // Inserează după segmentul i (adică la pozitia i în user waypoints)
-          bestProj = { x: projX, y: projY };
-        }
-      }
-      
-      // Adaugă punctul la poziția corectă în user waypoints
-      const newConnections = connections.map(c => {
-        if (c.id !== connection.id) return c;
-        const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
-        newWps.splice(insertIdx, 0, bestProj); // Inserează la poziția insertIdx
-        return { ...c, controlPoints: newWps };
-      });
-      setConnections(newConnections);
-    };
+  // Adaugă punct intermediar pe muchie la dublu-click - doar pe segmentele user waypoints
+  const handleEdgeDoubleClick = (e, connection) => {
+    if (!connection) return;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    // Drag waypoint
-    const handleWaypointMouseDown = (e, connectionId, idx) => {
-      e.stopPropagation();
-      setDraggingWaypoint({ connectionId, idx });
-    };
+    const fromEl = elements.find(el => el.id === connection.from);
+    const toEl = elements.find(el => el.id === connection.to);
+    if (!fromEl || !toEl) return;
 
-    // Șterge waypoint la Alt+click
-    const handleWaypointClick = (e, connectionId, idx) => {
-      if (!e.altKey) return;
-      setConnections(connections => connections.map(c => {
-        if (c.id !== connectionId) return c;
-        const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
-        newWps.splice(idx, 1);
-        return { ...c, controlPoints: newWps };
-      }));
-    };
+    const fromPt = getConnectionPointForElement(fromEl, connection.fromPoint);
+    const toPt = getConnectionPointForElement(toEl, connection.toPoint);
+    const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
 
-    // Returnează waypoints: capăt start + user + capăt end
-    function getConnectionWaypoints(connection) {
-      // capăt start
-      const fromEl = elements.find(el => el.id === connection.from);
-      const toEl = elements.find(el => el.id === connection.to);
-      if (!fromEl || !toEl) return [];
-      const fromPt = getConnectionPointForElement(fromEl, connection.fromPoint);
-      const toPt = getConnectionPointForElement(toEl, connection.toPoint);
-      const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
-      // Dacă nu există puncte intermediare, folosește rutarea completă
-      if (userWps.length === 0) {
-        return findPathAroundObstacles(
-          fromPt.x, fromPt.y, toPt.x, toPt.y,
-          elements, [connection.from, connection.to], connection.toPoint?.point
-        );
+    // Construiește segmente doar din user waypoints: start -> pct1 -> pct2 -> ... -> end
+    const segmentPoints = [fromPt, ...userWps, toPt];
+    let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+
+    for (let i = 0; i < segmentPoints.length - 1; i++) {
+      const { dist, projX, projY } = distanceToSegment(x, y, segmentPoints[i].x, segmentPoints[i].y, segmentPoints[i + 1].x, segmentPoints[i + 1].y);
+      if (dist < minDist) {
+        minDist = dist;
+        insertIdx = i; // Inserează după segmentul i (adică la pozitia i în user waypoints)
+        bestProj = { x: projX, y: projY };
       }
-      // Altfel, rutează fiecare segment între puncte fixe
-      const allPoints = [fromPt, ...userWps, toPt];
-      let result = [allPoints[0]];
-      for (let i = 0; i < allPoints.length - 1; i++) {
-        const seg = findPathAroundObstacles(
-          allPoints[i].x, allPoints[i].y, allPoints[i+1].x, allPoints[i+1].y,
-          elements, [connection.from, connection.to],
-          (i === allPoints.length - 2) ? connection.toPoint?.point : null
-        );
-        // evită duplicarea punctului de start
-        result = result.concat(seg.slice(1));
-      }
-      return result;
     }
+
+    // Adaugă punctul la poziția corectă în user waypoints
+    const newConnections = connections.map(c => {
+      if (c.id !== connection.id) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+      newWps.splice(insertIdx, 0, bestProj); // Inserează la poziția insertIdx
+      return { ...c, controlPoints: newWps };
+    });
+    setConnections(newConnections);
+  };
+
+  // Drag waypoint
+  const handleWaypointMouseDown = (e, connectionId, idx) => {
+    e.stopPropagation();
+    setDraggingWaypoint({ connectionId, idx });
+  };
+
+  // Șterge waypoint la Alt+click
+  const handleWaypointClick = (e, connectionId, idx) => {
+    if (!e.altKey) return;
+    setConnections(connections => connections.map(c => {
+      if (c.id !== connectionId) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+      newWps.splice(idx, 1);
+      return { ...c, controlPoints: newWps };
+    }));
+  };
+
+  // Returnează waypoints: capăt start + user + capăt end
+  function getConnectionWaypoints(connection) {
+    // capăt start
+    const fromEl = elements.find(el => el.id === connection.from);
+    const toEl = elements.find(el => el.id === connection.to);
+    if (!fromEl || !toEl) return [];
+    const fromPt = getConnectionPointForElement(fromEl, connection.fromPoint);
+    const toPt = getConnectionPointForElement(toEl, connection.toPoint);
+    const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
+    // Dacă nu există puncte intermediare, folosește rutarea completă
+    if (userWps.length === 0) {
+      return findPathAroundObstacles(
+        fromPt.x, fromPt.y, toPt.x, toPt.y,
+        elements, [connection.from, connection.to], connection.toPoint?.point
+      );
+    }
+    // Altfel, rutează fiecare segment între puncte fixe
+    const allPoints = [fromPt, ...userWps, toPt];
+    let result = [allPoints[0]];
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      const seg = findPathAroundObstacles(
+        allPoints[i].x, allPoints[i].y, allPoints[i + 1].x, allPoints[i + 1].y,
+        elements, [connection.from, connection.to],
+        (i === allPoints.length - 2) ? connection.toPoint?.point : null
+      );
+      // evită duplicarea punctului de start
+      result = result.concat(seg.slice(1));
+    }
+    return result;
+  }
   const { diagramId } = useParams();
   const navigate = useNavigate();
 
@@ -428,7 +428,7 @@ function ClassDiagramEditor() {
       ...(token && { 'Authorization': `Bearer ${token}` })
     };
   };
-  
+
   // CLASS diagram elements - EXACTLY like UMLEditor
   const CLASS_ELEMENTS = {
     CLASS: { label: 'Class', icon: 'C', color: '#fffef0', isNode: true },
@@ -438,7 +438,7 @@ function ClassDiagramEditor() {
     AGGREGATION: { label: 'Aggregation', icon: '◇', color: '#f3e8ff', isConnection: true },
     ASSOCIATION: { label: 'Association', icon: '→', color: '#f3e8ff', isConnection: true }
   };
-  
+
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
   const [selectedElement, setSelectedElement] = useState(null);
@@ -498,50 +498,50 @@ function ClassDiagramEditor() {
   }, [elements, selectedElement]);
 
   const loadDiagram = async (id) => {
-  setIsLoading(true);
-  try {
-    const apiUrl = process.env.REACT_APP_API_URL || '/api';
-    // <-- SCHIMBAT URL și adăugat headers
-    const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
-      headers: getAuthHeaders()
-    });
-    
-    if (response.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      localStorage.removeItem('username');
-      navigate('/login');
-      return;
+    setIsLoading(true);
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      // <-- SCHIMBAT URL și adăugat headers
+      const response = await fetch(`${apiUrl}/class-diagrams/${id}`, {
+        headers: getAuthHeaders()
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('username');
+        navigate('/login');
+        return;
+      }
+
+      const result = await response.json();
+      if (result.diagram?.data) {
+        setTitle(result.diagram.title || 'Untitled Diagram');
+        setElements(result.diagram.data.elements || []);
+        setConnections(result.diagram.data.connections || []);
+        setCurrentDiagramId(id);
+        sessionStorage.setItem('currentDiagramId', id);
+      } else {
+        console.error('Invalid response format:', result);
+        alert('Eroare: Format de răspuns invalid din server');
+      }
+    } catch (err) {
+      console.error('Error loading diagram:', err);
+      alert(`Eroare la încărcarea diagramei: ${err.message}`);
+    } finally {
+      setIsLoading(false);
     }
-    
-    const result = await response.json();
-    if (result.diagram?.data) {
-      setTitle(result.diagram.title || 'Untitled Diagram');
-      setElements(result.diagram.data.elements || []);
-      setConnections(result.diagram.data.connections || []);
-      setCurrentDiagramId(id);
-      sessionStorage.setItem('currentDiagramId', id);
-    } else {
-      console.error('Invalid response format:', result);
-      alert('Eroare: Format de răspuns invalid din server');
-    }
-  } catch (err) {
-    console.error('Error loading diagram:', err);
-    alert(`Eroare la încărcarea diagramei: ${err.message}`);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   const handleAddAttribute = (e, elementId) => {
     e.stopPropagation();
     const el = elements.find(elem => elem.id === elementId);
     if (!el || el.type !== 'CLASS') return;
     if (editingMember) handleSaveMember(false);
-    
+
     const newAttrs = [...(el.attributes || []), '-newAttr: Type'];
     const newIndex = newAttrs.length - 1;
-    setElements(elements.map(elem => 
+    setElements(elements.map(elem =>
       elem.id === elementId ? { ...elem, attributes: newAttrs } : elem
     ));
     setEditingMember({ elementId, type: 'attribute', index: newIndex });
@@ -552,13 +552,13 @@ function ClassDiagramEditor() {
   const handleAddMethod = (e, elementId) => {
     e.stopPropagation();
     if (editingMember) handleSaveMember(false);
-    
+
     const el = elements.find(elem => elem.id === elementId);
     if (!el) return;
-    
+
     const newMethods = [...(el.methods || []), '+method(): void'];
     const newIndex = newMethods.length - 1;
-    setElements(elements.map(elem => 
+    setElements(elements.map(elem =>
       elem.id === elementId ? { ...elem, methods: newMethods } : elem
     ));
     setEditingMember({ elementId, type: 'method', index: newIndex });
@@ -577,15 +577,15 @@ function ClassDiagramEditor() {
 
   const handleSaveMember = (addNext = false) => {
     if (!editingMember) return;
-    
+
     const { elementId, type, index } = editingMember;
     const currentEl = elements.find(e => e.id === elementId);
     if (!currentEl) return;
-    
+
     let nextIndex = -1;
     const defaultAttr = '-attr: Type';
     const defaultMethod = '+method(): void';
-    
+
     if (type === 'attribute') {
       if (currentEl.type !== 'CLASS') return;
       const newAttrs = [...(currentEl.attributes || [])];
@@ -598,7 +598,7 @@ function ClassDiagramEditor() {
       } else {
         newAttrs.splice(index, 1);
       }
-      setElements(elements.map(el => 
+      setElements(elements.map(el =>
         el.id === elementId ? { ...el, attributes: newAttrs } : el
       ));
       if (addNext && editMemberValue.trim()) {
@@ -619,7 +619,7 @@ function ClassDiagramEditor() {
       } else {
         newMethods.splice(index, 1);
       }
-      setElements(elements.map(el => 
+      setElements(elements.map(el =>
         el.id === elementId ? { ...el, methods: newMethods } : el
       ));
       if (addNext && editMemberValue.trim()) {
@@ -634,7 +634,7 @@ function ClassDiagramEditor() {
 
   const handleSaveName = () => {
     if (editingElement) {
-      setElements(elements.map(el => 
+      setElements(elements.map(el =>
         el.id === editingElement ? { ...el, name: editName } : el
       ));
       setEditingElement(null);
@@ -643,16 +643,16 @@ function ClassDiagramEditor() {
 
   const handleElementClick = (e, el) => {
     e.stopPropagation();
-    
+
     if (connectionMode) {
       // Always detect connection point - works from ANY click on element
       const clickedPoint = detectConnectionPointOnContour(e, el);
-      
+
       if (!clickedPoint) {
         console.warn('Failed to detect connection point');
         return;
       }
-      
+
       if (!connectionStart) {
         // First click - select START point
         setConnectionStart({ elementId: el.id, point: clickedPoint });
@@ -679,7 +679,7 @@ function ClassDiagramEditor() {
       }
       return;
     }
-    
+
     // Normal element selection
     setSelectedElement(el.id);
     setEditName(el.name);
@@ -712,16 +712,16 @@ function ClassDiagramEditor() {
       const canvasRect = canvasRef.current.getBoundingClientRect();
       const newX = Math.max(0, e.clientX - canvasRect.left - dragOffset.x);
       const newY = Math.max(0, e.clientY - canvasRect.top - dragOffset.y);
-      
+
       // Check for collision with other elements
       if (hasCollisionWithOthers(draggingElement, newX, newY, draggedElement.width || 200, draggedElement.height || 140)) {
         return; // Do not allow movement if it would cause overlap
       }
-      
+
       // Calculate delta movement
       const deltaX = newX - draggedElement.x;
       const deltaY = newY - draggedElement.y;
-      
+
       setElements(elements.map(el =>
         el.id === draggingElement
           ? { ...el, x: newX, y: newY }
@@ -772,7 +772,7 @@ function ClassDiagramEditor() {
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
-    
+
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -782,14 +782,14 @@ function ClassDiagramEditor() {
   // Collision detection helpers
   const checkCollision = (rect1, rect2) => {
     return !(rect1.x + rect1.width <= rect2.x ||
-             rect2.x + rect2.width <= rect1.x ||
-             rect1.y + rect1.height <= rect2.y ||
-             rect2.y + rect2.height <= rect1.y);
+      rect2.x + rect2.width <= rect1.x ||
+      rect1.y + rect1.height <= rect2.y ||
+      rect2.y + rect2.height <= rect1.y);
   };
 
   const hasCollisionWithOthers = (elementId, newX, newY, newWidth, newHeight) => {
     const movingRect = { x: newX, y: newY, width: newWidth, height: newHeight };
-    
+
     for (const el of elements) {
       if (el.id === elementId) continue;
       const elRect = { x: el.x, y: el.y, width: el.width || 200, height: el.height || 140 };
@@ -859,7 +859,7 @@ function ClassDiagramEditor() {
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
-    
+
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -878,7 +878,7 @@ function ClassDiagramEditor() {
         if (c.id !== draggingWaypoint.connectionId) return c;
         const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
         newWps[draggingWaypoint.idx] = { x, y };
-        
+
         // Sortează waypoints după poziția lor pe linia de conexiune
         const fromEl = elements.find(el => el.id === c.from);
         const toEl = elements.find(el => el.id === c.to);
@@ -888,7 +888,7 @@ function ClassDiagramEditor() {
           const dx = toPt.x - fromPt.x;
           const dy = toPt.y - fromPt.y;
           const l2 = dx * dx + dy * dy;
-          
+
           if (l2 > 0) {
             newWps.sort((a, b) => {
               const tA = ((a.x - fromPt.x) * dx + (a.y - fromPt.y) * dy) / l2;
@@ -897,7 +897,7 @@ function ClassDiagramEditor() {
             });
           }
         }
-        
+
         return { ...c, controlPoints: newWps };
       }));
     };
@@ -1105,102 +1105,102 @@ function ClassDiagramEditor() {
 
   // Save or Update Diagram - Auto-detects based on currentDiagramId
   const handleSaveToDatabase = async () => {
-  // <-- ADAUGAT: Verifică token-ul
-  const token = localStorage.getItem('token');
-  if (!token) {
-    alert('Trebuie să fii autentificat pentru a salva diagrama!');
-    navigate('/login');
-    return;
-  }
-  
-  const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
-  const diagramTitle = activeDiagramId
-    ? title
-    : prompt('Introdu numele diagramei:', title || 'UML Class Diagram');
-
-  if (!diagramTitle) return;
-
-  try {
-    const userId = localStorage.getItem('userId');
-    if (!userId) {
-      alert('Trebuie să fii logat pentru a salva diagrama!');
+    // <-- ADAUGAT: Verifică token-ul
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a salva diagrama!');
       navigate('/login');
       return;
     }
 
-    const diagramData = {
-      selectedType: 'CLASS',
-      elements: elements,
-      connections: prepareDiagramForSave()
-    };
+    const activeDiagramId = currentDiagramId || sessionStorage.getItem('currentDiagramId');
+    const diagramTitle = activeDiagramId
+      ? title
+      : prompt('Introdu numele diagramei:', title || 'UML Class Diagram');
 
-    const apiUrl = process.env.REACT_APP_API_URL || '/api';
-    let response, result;
+    if (!diagramTitle) return;
 
-    if (activeDiagramId) {
-      // UPDATE existing diagram
-      response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),  // <-- SCHIMBAT
-        body: JSON.stringify({ diagram: diagramData })
-      });
-      
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('username');
-        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+    try {
+      const userId = localStorage.getItem('userId');
+      if (!userId) {
+        alert('Trebuie să fii logat pentru a salva diagrama!');
         navigate('/login');
         return;
       }
-      
-      result = await response.json();
 
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
-        setTitle(diagramTitle);
-      }
-    } else {
-      // CREATE new diagram
-      const newDiagramData = {
-        title: diagramTitle,
-        userId: parseInt(userId),
-        diagram: diagramData
+      const diagramData = {
+        selectedType: 'CLASS',
+        elements: elements,
+        connections: prepareDiagramForSave()
       };
 
-      response = await fetch(`${apiUrl}/class-diagrams`, {
-        method: 'POST',
-        headers: getAuthHeaders(),  // <-- SCHIMBAT
-        body: JSON.stringify(newDiagramData)
-      });
-      
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        localStorage.removeItem('username');
-        alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
-        navigate('/login');
-        return;
-      }
-      
-      result = await response.json();
+      const apiUrl = process.env.REACT_APP_API_URL || '/api';
+      let response, result;
 
-      if (response.ok) {
-        alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
-        setCurrentDiagramId(result.diagramId);
-        sessionStorage.setItem('currentDiagramId', result.diagramId);
-        setTitle(diagramTitle);
-      }
-    }
+      if (activeDiagramId) {
+        // UPDATE existing diagram
+        response = await fetch(`${apiUrl}/class-diagrams/${activeDiagramId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),  // <-- SCHIMBAT
+          body: JSON.stringify({ diagram: diagramData })
+        });
 
-    if (!response.ok) {
-      alert(`Eroare: ${result.error}`);
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('username');
+          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+          navigate('/login');
+          return;
+        }
+
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost actualizată cu succes!`);
+          setTitle(diagramTitle);
+        }
+      } else {
+        // CREATE new diagram
+        const newDiagramData = {
+          title: diagramTitle,
+          userId: parseInt(userId),
+          diagram: diagramData
+        };
+
+        response = await fetch(`${apiUrl}/class-diagrams`, {
+          method: 'POST',
+          headers: getAuthHeaders(),  // <-- SCHIMBAT
+          body: JSON.stringify(newDiagramData)
+        });
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('username');
+          alert('Sesiune expirată. Te rugăm să te autentifici din nou.');
+          navigate('/login');
+          return;
+        }
+
+        result = await response.json();
+
+        if (response.ok) {
+          alert(`Diagrama "${diagramTitle}" a fost salvată cu succes! ID: ${result.diagramId}`);
+          setCurrentDiagramId(result.diagramId);
+          sessionStorage.setItem('currentDiagramId', result.diagramId);
+          setTitle(diagramTitle);
+        }
+      }
+
+      if (!response.ok) {
+        alert(`Eroare: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error saving to database:', error);
+      alert(`Eroare la salvare: ${error.message}`);
     }
-  } catch (error) {
-    console.error('Error saving to database:', error);
-    alert(`Eroare la salvare: ${error.message}`);
-  }
-};
+  };
 
 
 
@@ -1259,7 +1259,7 @@ function ClassDiagramEditor() {
       else if (conn.type === 'AGGREGATION') marker = 'url(#arrowDiamondOpen)';
       else if (conn.type === 'ASSOCIATION') marker = 'url(#arrowSimple)';
       svg += `<path d='${pathD}' fill='none' stroke='#8b4513' stroke-width='2' marker-end='${marker}'/>\n`;
-      
+
       // Nu mai desenează cercuri de waypoint în export SVG
       /* if (conn.controlPoints && Array.isArray(conn.controlPoints)) {
         conn.controlPoints.forEach(pt => {
@@ -1274,43 +1274,43 @@ function ClassDiagramEditor() {
       const h = el.height || 140;
       const x = el.x;
       const y = el.y;
-      
+
       if (el.type === 'CLASS' || el.type === 'INTERFACE') {
         const isClass = el.type === 'CLASS';
         const isInterface = el.type === 'INTERFACE';
-        
+
         // Header height
         const headerHeight = isInterface ? 50 : 36;
-        
+
         // For INTERFACE: always 1 section (methods only)
         // For CLASS: always 2 sections (attributes + methods)
         const numSections = isClass ? 2 : 1;
         const sectionHeight = (h - headerHeight) / numSections;
-        
+
         // Box
         svg += `<rect x='${x}' y='${y}' width='${w}' height='${h}' rx='6' fill='#fffef0' stroke='#8b4513' stroke-width='2'/>\n`;
-        
+
         // Header
         svg += `<rect x='${x}' y='${y}' width='${w}' height='${headerHeight}' fill='#fff7e6' stroke='#8b4513' stroke-width='1'/>\n`;
-        
+
         // Stereotype label for interface
         if (isInterface) {
           const stereoY = y + 15;
           svg += `<text x='${x + w / 2}' y='${stereoY}' font-size='11' font-family='monospace' text-anchor='middle' fill='#666' font-style='italic'>&#171;interface&#187;</text>\n`;
         }
-        
+
         // Class/Interface name
         const nameY = isInterface ? y + 35 : y + headerHeight / 2 + 6;
         svg += `<text x='${x + w / 2}' y='${nameY}' font-size='14' font-family='monospace' font-weight='bold' text-anchor='middle' fill='#222'>${escapeXML(el.name)}</text>\n`;
-        
+
         // Line under header
         svg += `<line x1='${x}' y1='${y + headerHeight}' x2='${x + w}' y2='${y + headerHeight}' stroke='#8b4513' stroke-width='1'/>\n`;
-        
+
         if (isClass) {
           // ATTRIBUTES SECTION
           const attrSectionStart = y + headerHeight;
           const attrSectionEnd = attrSectionStart + sectionHeight;
-          
+
           if (el.attributes && el.attributes.length > 0) {
             const itemHeight = sectionHeight / el.attributes.length;
             el.attributes.forEach((attr, i) => {
@@ -1318,13 +1318,13 @@ function ClassDiagramEditor() {
               svg += `<text x='${x + 8}' y='${textY}' font-size='12' font-family='monospace' fill='#222'>${escapeXML(attr)}</text>\n`;
             });
           }
-          
+
           // Line between attributes and methods (always rendered)
           svg += `<line x1='${x}' y1='${attrSectionEnd}' x2='${x + w}' y2='${attrSectionEnd}' stroke='#8b4513' stroke-width='1'/>\n`;
-          
+
           // METHODS SECTION
           const methodSectionStart = attrSectionEnd;
-          
+
           if (el.methods && el.methods.length > 0) {
             const itemHeight = sectionHeight / el.methods.length;
             el.methods.forEach((method, i) => {
@@ -1335,7 +1335,7 @@ function ClassDiagramEditor() {
         } else {
           // INTERFACE - METHODS SECTION ONLY
           const methodSectionStart = y + headerHeight;
-          
+
           if (el.methods && el.methods.length > 0) {
             const itemHeight = sectionHeight / el.methods.length;
             el.methods.forEach((method, i) => {
@@ -1378,20 +1378,20 @@ function ClassDiagramEditor() {
     if (!file) return;
 
     const token = localStorage.getItem('token');
-  if (!token) {
-    alert('Trebuie să fii autentificat pentru a importa o diagramă!');
-    navigate('/login');
-    return;
-  }
-    
+    if (!token) {
+      alert('Trebuie să fii autentificat pentru a importa o diagramă!');
+      navigate('/login');
+      return;
+    }
+
     // Extract filename without extension for title
     const fileName = file.name.replace(/\.json$/i, '');
-    
+
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
-        
+
         // Load diagram data
         if (data.selectedType) {
           // Just for reference, CLASS type is already set
@@ -1402,10 +1402,10 @@ function ClassDiagramEditor() {
         if (data.connections && Array.isArray(data.connections)) {
           setConnections(data.connections);
         }
-        
+
         // Set title from filename
         setTitle(fileName || 'Imported Diagram');
-        
+
         // Clear any selection
         setSelectedElement(null);
         setEditingElement(null);
@@ -1420,7 +1420,7 @@ function ClassDiagramEditor() {
       alert('Eroare la citirea fișierului!');
     };
     reader.readAsText(file);
-    
+
     // Reset file input so same file can be imported again
     event.target.value = '';
   };
@@ -1455,7 +1455,7 @@ function ClassDiagramEditor() {
           </div>
         </div>
       )}
-      
+
       <div className="uml-editor">
         <div className="uml-header">
           <button className="btn-back" onClick={() => navigate('/dashboard')}>
@@ -1486,7 +1486,7 @@ function ClassDiagramEditor() {
           <div className="connection-mode-bar">
             <span>
               🔗 Connection mode: <strong>{CLASS_ELEMENTS[connectionMode].label}</strong>
-              {connectionStart 
+              {connectionStart
                 ? ` - START point selected • Click on element to complete`
                 : ' - Click on first element'}
             </span>
@@ -1565,7 +1565,7 @@ function ClassDiagramEditor() {
                   onMouseDown={(e) => handleElementMouseDown(e, el)}
                 >
                   {isClassType ? (
-                    <div 
+                    <div
                       className="uml-class-box"
                       style={{
                         minHeight: el.height || (() => {
@@ -1605,11 +1605,11 @@ function ClassDiagramEditor() {
                         )}
                       </div>
                       {el.type === 'CLASS' && (
-                        <div 
+                        <div
                           className="uml-class-section uml-attributes"
                           style={{
-                            flex: ((el.attributes?.length || 0) + (el.methods?.length || 0) === 0) 
-                              ? 1 
+                            flex: ((el.attributes?.length || 0) + (el.methods?.length || 0) === 0)
+                              ? 1
                               : Math.max(1, el.attributes?.length || 0),
                             minHeight: '30px'
                           }}
@@ -1619,9 +1619,9 @@ function ClassDiagramEditor() {
                             <div className="uml-empty-hint">dublu-click pentru atribute</div>
                           ) : (
                             el.attributes.map((attr, idx) => (
-                              editingMember?.elementId === el.id && 
-                              editingMember?.type === 'attribute' && 
-                              editingMember?.index === idx ? (
+                              editingMember?.elementId === el.id &&
+                                editingMember?.type === 'attribute' &&
+                                editingMember?.index === idx ? (
                                 <input
                                   key={idx}
                                   type="text"
@@ -1637,8 +1637,8 @@ function ClassDiagramEditor() {
                                   onClick={(e) => e.stopPropagation()}
                                 />
                               ) : (
-                                <div 
-                                  key={idx} 
+                                <div
+                                  key={idx}
                                   className="uml-member"
                                   onDoubleClick={(e) => handleEditMember(e, el.id, 'attribute', idx, attr)}
                                 >
@@ -1649,11 +1649,11 @@ function ClassDiagramEditor() {
                           )}
                         </div>
                       )}
-                      <div 
+                      <div
                         className="uml-class-section uml-methods"
                         style={{
-                          flex: ((el.attributes?.length || 0) + (el.methods?.length || 0) === 0) 
-                            ? 1 
+                          flex: ((el.attributes?.length || 0) + (el.methods?.length || 0) === 0)
+                            ? 1
                             : Math.max(1, el.methods?.length || 0),
                           minHeight: '30px'
                         }}
@@ -1663,9 +1663,9 @@ function ClassDiagramEditor() {
                           <div className="uml-empty-hint">dublu-click pentru metode</div>
                         ) : (
                           el.methods.map((method, idx) => (
-                            editingMember?.elementId === el.id && 
-                            editingMember?.type === 'method' && 
-                            editingMember?.index === idx ? (
+                            editingMember?.elementId === el.id &&
+                              editingMember?.type === 'method' &&
+                              editingMember?.index === idx ? (
                               <input
                                 key={idx}
                                 type="text"
@@ -1681,8 +1681,8 @@ function ClassDiagramEditor() {
                                 onClick={(e) => e.stopPropagation()}
                               />
                             ) : (
-                              <div 
-                                key={idx} 
+                              <div
+                                key={idx}
                                 className="uml-member"
                                 onDoubleClick={(e) => handleEditMember(e, el.id, 'method', idx, method)}
                               >
@@ -1715,10 +1715,10 @@ function ClassDiagramEditor() {
                       )}
                     </div>
                   )}
-                
+
                   {selectedElement === el.id && !editingElement && (
                     <>
-                      <button 
+                      <button
                         className="element-delete"
                         onClick={(e) => { e.stopPropagation(); handleDeleteElement(el.id); }}
                       >
@@ -1749,22 +1749,22 @@ function ClassDiagramEditor() {
               <defs>
                 {/* INHERITANCE - Filled triangle with white inside */}
                 <marker id="arrowTriangle" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
-                  <path d="M 0 0 L 18 9 L 0 18 Z" fill="white" stroke="#8b4513" strokeWidth="2" strokeLinejoin="miter"/>
+                  <path d="M 0 0 L 18 9 L 0 18 Z" fill="white" stroke="#8b4513" strokeWidth="2" strokeLinejoin="miter" />
                 </marker>
-                
+
                 {/* COMPOSITION - Filled diamond */}
                 <marker id="arrowDiamond" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
-                  <path d="M 0 9 L 9 0 L 18 9 L 9 18 Z" fill="#8b4513" stroke="#8b4513" strokeWidth="1"/>
+                  <path d="M 0 9 L 9 0 L 18 9 L 9 18 Z" fill="#8b4513" stroke="#8b4513" strokeWidth="1" />
                 </marker>
-                
+
                 {/* AGGREGATION - Open diamond (hollow) */}
                 <marker id="arrowDiamondOpen" markerWidth="18" markerHeight="18" refX="17" refY="9" orient="auto">
-                  <path d="M 0 9 L 9 0 L 18 9 L 9 18 Z" fill="white" stroke="#8b4513" strokeWidth="2" strokeLinejoin="miter"/>
+                  <path d="M 0 9 L 9 0 L 18 9 L 9 18 Z" fill="white" stroke="#8b4513" strokeWidth="2" strokeLinejoin="miter" />
                 </marker>
-                
+
                 {/* ASSOCIATION - Simple open arrow */}
                 <marker id="arrowSimple" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
-                  <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#8b4513" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M 0 0 L 14 7 L 0 14" fill="none" stroke="#8b4513" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </marker>
               </defs>
               {connections.map((conn) => {
@@ -1785,8 +1785,8 @@ function ClassDiagramEditor() {
                       stroke="transparent"
                       strokeWidth="15"
                       pointerEvents="auto"
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setSelectedElement(null);
                         setSelectedConnection(conn.id);
                       }}
@@ -1930,202 +1930,202 @@ function ClassDiagramEditor() {
             })} */}
           </div>
 
-        {/* Right Properties Panel */}
-        <div className="uml-properties">
-          <h3>Properties</h3>
-          {selectedElement ? (() => {
-            const el = elements.find(e => e.id === selectedElement);
-            if (!el) return null;
-            
-            return (
-              <div className="properties-panel">
-                <label>Element Name:</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      setElements(elements.map(elem => 
-                        elem.id === selectedElement ? { ...elem, name: editName } : elem
-                      ));
-                    }
-                  }}
-                />
-                <button className="btn-primary" onClick={() => {
-                  setElements(elements.map(elem => 
-                    elem.id === selectedElement ? { ...elem, name: editName } : elem
-                  ));
-                }}>
-                  Update
-                </button>
+          {/* Right Properties Panel */}
+          <div className="uml-properties">
+            <h3>Properties</h3>
+            {selectedElement ? (() => {
+              const el = elements.find(e => e.id === selectedElement);
+              if (!el) return null;
 
-                {el.type === 'CLASS' && (
-                  <div className="property-section">
-                    <div className="property-section-header">
-                      <label>Attributes:</label>
-                      <button 
-                        className="btn-add"
-                        onClick={() => {
-                          setElements(elements.map(elem => 
-                            elem.id === selectedElement 
-                              ? { ...elem, attributes: [...(el.attributes || []), '-newAttr: Type'] }
-                              : elem
-                          ));
-                        }}
-                      >
-                        + Add
-                      </button>
-                    </div>
-                    {(el?.attributes || []).map((attr, idx) => (
-                      <div key={idx} className="property-list-item">
-                        <input
-                          type="text"
-                          value={attr}
-                          onChange={(e) => {
-                            const newAttrs = [...el.attributes];
-                            newAttrs[idx] = e.target.value;
-                            setElements(elements.map(elem => 
-                              elem.id === selectedElement 
-                                ? { ...elem, attributes: newAttrs }
-                                : elem
-                            ));
-                          }}
-                        />
-                        <button 
-                          className="btn-danger"
-                          onClick={() => {
-                            const newAttrs = el.attributes.filter((_, i) => i !== idx);
-                            setElements(elements.map(elem => 
-                              elem.id === selectedElement 
-                                ? { ...elem, attributes: newAttrs }
-                                : elem
-                            ));
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {el.type === 'CLASS' && (
-                  <div className="property-section">
-                    <div className="property-section-header">
-                      <label>Methods:</label>
-                      <button 
-                        className="btn-add"
-                        onClick={() => {
-                          setElements(elements.map(elem => 
-                            elem.id === selectedElement 
-                              ? { ...elem, methods: [...(el.methods || []), '+newMethod(): void'] }
-                              : elem
-                          ));
-                        }}
-                      >
-                        + Add
-                      </button>
-                    </div>
-                    {(el?.methods || []).map((method, idx) => (
-                      <div key={idx} className="property-list-item">
-                        <input
-                          type="text"
-                          value={method}
-                          onChange={(e) => {
-                            const newMethods = [...el.methods];
-                            newMethods[idx] = e.target.value;
-                            setElements(elements.map(elem => 
-                              elem.id === selectedElement 
-                                ? { ...elem, methods: newMethods }
-                                : elem
-                            ));
-                          }}
-                        />
-                        <button 
-                          className="btn-danger"
-                          onClick={() => {
-                            const newMethods = el.methods.filter((_, i) => i !== idx);
-                            setElements(elements.map(elem => 
-                              elem.id === selectedElement 
-                                ? { ...elem, methods: newMethods }
-                                : elem
-                            ));
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <button 
-                  className="btn-danger" 
-                  style={{ marginTop: '16px', width: '100%' }}
-                  onClick={() => handleDeleteElement(selectedElement)}
-                >
-                  🗑️ Delete Element
-                </button>
-              </div>
-            );
-          })() : (
-            <div className="diagram-info">
-              <p><strong>Select an element</strong> to edit</p>
-            </div>
-          )}
-
-          {/* Connections List - Always visible */}
-          <h3 style={{ marginTop: '20px' }}>All Connections</h3>
-          <div className="connections-list">
-            {connections.length === 0 ? (
-              <p style={{ color: '#999', fontSize: '13px' }}>No connections yet</p>
-            ) : (
-              connections.map(conn => {
-                const fromEl = elements.find(e => e.id === conn.from);
-                const toEl = elements.find(e => e.id === conn.to);
-                const isSelected = selectedConnection === conn.id;
-                return (
-                  <div 
-                    key={conn.id} 
-                    className="connection-item"
-                    style={{
-                      backgroundColor: isSelected ? '#e9d5ff' : 'transparent',
-                      borderLeft: isSelected ? '4px solid #9168b7' : '4px solid transparent',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onClick={() => {
-                      if (isSelected) {
-                        setSelectedConnection(null);
-                      } else {
-                        setSelectedConnection(conn.id);
-                        setSelectedElement(null);
+              return (
+                <div className="properties-panel">
+                  <label>Element Name:</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        setElements(elements.map(elem =>
+                          elem.id === selectedElement ? { ...elem, name: editName } : elem
+                        ));
                       }
                     }}
+                  />
+                  <button className="btn-primary" onClick={() => {
+                    setElements(elements.map(elem =>
+                      elem.id === selectedElement ? { ...elem, name: editName } : elem
+                    ));
+                  }}>
+                    Update
+                  </button>
+
+                  {el.type === 'CLASS' && (
+                    <div className="property-section">
+                      <div className="property-section-header">
+                        <label>Attributes:</label>
+                        <button
+                          className="btn-add"
+                          onClick={() => {
+                            setElements(elements.map(elem =>
+                              elem.id === selectedElement
+                                ? { ...elem, attributes: [...(el.attributes || []), '-newAttr: Type'] }
+                                : elem
+                            ));
+                          }}
+                        >
+                          + Add
+                        </button>
+                      </div>
+                      {(el?.attributes || []).map((attr, idx) => (
+                        <div key={idx} className="property-list-item">
+                          <input
+                            type="text"
+                            value={attr}
+                            onChange={(e) => {
+                              const newAttrs = [...el.attributes];
+                              newAttrs[idx] = e.target.value;
+                              setElements(elements.map(elem =>
+                                elem.id === selectedElement
+                                  ? { ...elem, attributes: newAttrs }
+                                  : elem
+                              ));
+                            }}
+                          />
+                          <button
+                            className="btn-danger"
+                            onClick={() => {
+                              const newAttrs = el.attributes.filter((_, i) => i !== idx);
+                              setElements(elements.map(elem =>
+                                elem.id === selectedElement
+                                  ? { ...elem, attributes: newAttrs }
+                                  : elem
+                              ));
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {el.type === 'CLASS' && (
+                    <div className="property-section">
+                      <div className="property-section-header">
+                        <label>Methods:</label>
+                        <button
+                          className="btn-add"
+                          onClick={() => {
+                            setElements(elements.map(elem =>
+                              elem.id === selectedElement
+                                ? { ...elem, methods: [...(el.methods || []), '+newMethod(): void'] }
+                                : elem
+                            ));
+                          }}
+                        >
+                          + Add
+                        </button>
+                      </div>
+                      {(el?.methods || []).map((method, idx) => (
+                        <div key={idx} className="property-list-item">
+                          <input
+                            type="text"
+                            value={method}
+                            onChange={(e) => {
+                              const newMethods = [...el.methods];
+                              newMethods[idx] = e.target.value;
+                              setElements(elements.map(elem =>
+                                elem.id === selectedElement
+                                  ? { ...elem, methods: newMethods }
+                                  : elem
+                              ));
+                            }}
+                          />
+                          <button
+                            className="btn-danger"
+                            onClick={() => {
+                              const newMethods = el.methods.filter((_, i) => i !== idx);
+                              setElements(elements.map(elem =>
+                                elem.id === selectedElement
+                                  ? { ...elem, methods: newMethods }
+                                  : elem
+                              ));
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    className="btn-danger"
+                    style={{ marginTop: '16px', width: '100%' }}
+                    onClick={() => handleDeleteElement(selectedElement)}
                   >
-                    <span style={{ fontWeight: isSelected ? 'bold' : 'normal' }}>{fromEl?.name} → {toEl?.name}</span>
-                    <small style={{ color: isSelected ? '#7c3aed' : '#666' }}>{conn.type}</small>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConnections(connections.filter(c => c.id !== conn.id));
-                        if (isSelected) setSelectedConnection(null);
-                      }}
-                      title="Delete connection"
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })
+                    🗑️ Delete Element
+                  </button>
+                </div>
+              );
+            })() : (
+              <div className="diagram-info">
+                <p><strong>Select an element</strong> to edit</p>
+              </div>
             )}
+
+            {/* Connections List - Always visible */}
+            <h3 style={{ marginTop: '20px' }}>All Connections</h3>
+            <div className="connections-list">
+              {connections.length === 0 ? (
+                <p style={{ color: '#999', fontSize: '13px' }}>No connections yet</p>
+              ) : (
+                connections.map(conn => {
+                  const fromEl = elements.find(e => e.id === conn.from);
+                  const toEl = elements.find(e => e.id === conn.to);
+                  const isSelected = selectedConnection === conn.id;
+                  return (
+                    <div
+                      key={conn.id}
+                      className="connection-item"
+                      style={{
+                        backgroundColor: isSelected ? '#e9d5ff' : 'transparent',
+                        borderLeft: isSelected ? '4px solid #9168b7' : '4px solid transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedConnection(null);
+                        } else {
+                          setSelectedConnection(conn.id);
+                          setSelectedElement(null);
+                        }
+                      }}
+                    >
+                      <span style={{ fontWeight: isSelected ? 'bold' : 'normal' }}>{fromEl?.name} → {toEl?.name}</span>
+                      <small style={{ color: isSelected ? '#7c3aed' : '#666' }}>{conn.type}</small>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConnections(connections.filter(c => c.id !== conn.id));
+                          if (isSelected) setSelectedConnection(null);
+                        }}
+                        title="Delete connection"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
-        </div>
       </div>
-      </>
-    );
+    </>
+  );
 }
 
 export default ClassDiagramEditor;

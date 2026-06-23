@@ -103,6 +103,7 @@ exports.savePetriNet = async (req, res) => {
     // Salvează locurile (places) - sunt "Poziție" type
     if (places && Array.isArray(places)) {
       for (const place of places) {
+        const placeRadius = place.radius || 25;
         const placeResult = await pool.query(
           `INSERT INTO componente_existente 
            (id_diagrama, id_componenta, continut, x, y, weight, height) 
@@ -115,12 +116,13 @@ exports.savePetriNet = async (req, res) => {
               label: place.label || '',
               originalId: place.id,
               type: 'place',
-              tokens: place.tokens || 0
+              tokens: place.tokens || 0,
+              radius: placeRadius
             }),
             Math.round(place.x || 0),
             Math.round(place.y || 0),
-            50,
-            50
+            Math.round(placeRadius * 2),
+            Math.round(placeRadius * 2)
           ]
         );
         nodeIdMap[place.id] = placeResult.rows[0].id_instanta;
@@ -131,6 +133,8 @@ exports.savePetriNet = async (req, res) => {
     // Salvează tranziții (transitions)
     if (transitions && Array.isArray(transitions)) {
       for (const transition of transitions) {
+        const transWidth = transition.width || 50;
+        const transHeight = transition.height || 30;
         const transResult = await pool.query(
           `INSERT INTO componente_existente 
            (id_diagrama, id_componenta, continut, x, y, weight, height) 
@@ -142,12 +146,14 @@ exports.savePetriNet = async (req, res) => {
             JSON.stringify({ 
               label: transition.label || '',
               originalId: transition.id,
-              type: 'transition'
+              type: 'transition',
+              width: transWidth,
+              height: transHeight
             }),
             Math.round(transition.x || 0),
             Math.round(transition.y || 0),
-            50,
-            30
+            Math.round(transWidth),
+            Math.round(transHeight)
           ]
         );
         nodeIdMap[transition.id] = transResult.rows[0].id_instanta;
@@ -231,7 +237,7 @@ exports.loadPetriNet = async (req, res) => {
 
     // Obține componentele (locuri și tranziții)
     const componentsResult = await pool.query(
-      `SELECT ce.id_instanta, ce.continut, ce.x, ce.y
+      `SELECT ce.id_instanta, ce.continut, ce.x, ce.y, ce.weight, ce.height
        FROM componente_existente ce
        WHERE ce.id_diagrama = $1
        ORDER BY ce.id_instanta ASC`,
@@ -269,8 +275,11 @@ exports.loadPetriNet = async (req, res) => {
 
       if (continut.type === 'place') {
         element.tokens = continut.tokens || 0;
+        element.radius = continut.radius || (component.weight ? component.weight / 2 : 25);
         places.push(element);
       } else if (continut.type === 'transition') {
+        element.width = continut.width || component.weight || 50;
+        element.height = continut.height || component.height || 30;
         transitions.push(element);
       }
     }

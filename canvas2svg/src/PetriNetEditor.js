@@ -122,8 +122,8 @@ function buildSmoothedPathPetri(x1, y1, x2, y2, allPlaces, allTransitions, exclu
   
   // Combinarea tuturor nodurilor
   const allNodes = [
-    ...allPlaces.map(p => ({ ...p, type: 'place', radius: 25 })),
-    ...allTransitions.map(t => ({ ...t, type: 'transition', radius: 25 }))
+    ...allPlaces.map(p => ({ ...p, type: 'place', radius: p.radius || 25 })),
+    ...allTransitions.map(t => ({ ...t, type: 'transition', radius: Math.hypot(t.width || 50, t.height || 30) / 2, width: t.width || 50, height: t.height || 30 }))
   ];
 
   const dx = x2 - x1;
@@ -149,8 +149,8 @@ function buildSmoothedPathPetri(x1, y1, x2, y2, allPlaces, allTransitions, exclu
         d = Math.max(0, distancePointToSegment(n.x, n.y, x1, y1, x2, y2) - n.radius);
       } else {
         // Pentru transition (dreptunghi): distanța de la dreptunghi la linie
-        const halfW = 25; // TRANSITION_WIDTH / 2
-        const halfH = 15; // TRANSITION_HEIGHT / 2
+        const halfW = n.width / 2;
+        const halfH = n.height / 2;
         const rectDist = distancePointToSegment(n.x, n.y, x1, y1, x2, y2);
         d = Math.max(0, rectDist - Math.hypot(halfW, halfH) / 2);
       }
@@ -241,6 +241,7 @@ function PetriNetEditor() {
 
   // State pentru UI
   const [selectedElement, setSelectedElement] = useState(null); // {type, id}
+  const [resizing, setResizing] = useState(null); // { elementId, type, direction, startX, startY, ... }
   const [arcConnectionMode, setArcConnectionMode] = useState(false); // Are locum arc connection
   const [arcStart, setArcStart] = useState(null); // Start point for arc (alátag, transitions)
   const [arcPreviewPoints, setArcPreviewPoints] = useState([]);
@@ -389,24 +390,24 @@ function PetriNetEditor() {
   /**
    * Controlează coliziune între două locuri (cercuri)
    */
-  const checkPlaceCollision = (x1, y1, x2, y2, radius = PLACE_RADIUS) => {
+  const checkPlaceCollision = (x1, y1, r1, x2, y2, r2) => {
     const dist = Math.hypot(x1 - x2, y1 - y2);
-    return dist < radius * 2;
+    return dist < (r1 + r2);
   };
 
   /**
    * Controlează coliziune între două tranzitii (dreptunghiuri)
    */
-  const checkTransitionCollision = (x1, y1, x2, y2, width = TRANSITION_WIDTH, height = TRANSITION_HEIGHT) => {
-    const rect1 = { x: x1 - width / 2, y: y1 - height / 2, width, height };
-    const rect2 = { x: x2 - width / 2, y: y2 - height / 2, width, height };
+  const checkTransitionCollision = (x1, y1, w1, h1, x2, y2, w2, h2) => {
+    const rect1 = { x: x1 - w1 / 2, y: y1 - h1 / 2, width: w1, height: h1 };
+    const rect2 = { x: x2 - w2 / 2, y: y2 - h2 / 2, width: w2, height: h2 };
     return checkCollisionAABB(rect1, rect2);
   };
 
   /**
    * Controlează coliziune între loc și tranziție
    */
-  const checkPlaceTransitionCollision = (placeX, placeY, transX, transY, placeRadius = PLACE_RADIUS, transWidth = TRANSITION_WIDTH, transHeight = TRANSITION_HEIGHT) => {
+  const checkPlaceTransitionCollision = (placeX, placeY, placeRadius, transX, transY, transWidth, transHeight) => {
     const rectX = transX - transWidth / 2;
     const rectY = transY - transHeight / 2;
     return checkCollisionCircleRect(placeX, placeY, placeRadius, rectX, rectY, transWidth, transHeight);
@@ -415,29 +416,164 @@ function PetriNetEditor() {
   /**
    * Controlează coliziune cu alte elemente (ExistENTE)
    */
-  const hasCollisionWithOthers = (elementType, elementId, newX, newY) => {
+  const hasCollisionWithOthers = (elementType, elementId, newX, newY, size1, size2) => {
+    let r1 = elementType === 'place' ? (size1 !== undefined ? size1 : PLACE_RADIUS) : null;
+    let w1 = elementType === 'transition' ? (size1 !== undefined ? size1 : TRANSITION_WIDTH) : null;
+    let h1 = elementType === 'transition' ? (size2 !== undefined ? size2 : TRANSITION_HEIGHT) : null;
+
     // Controlează coliziune cu alte locuri
     for (const place of places) {
       if (place.id === elementId) continue;
+      const r2 = place.radius || PLACE_RADIUS;
       if (elementType === 'place') {
-        if (checkPlaceCollision(newX, newY, place.x, place.y)) return true;
+        if (checkPlaceCollision(newX, newY, r1, place.x, place.y, r2)) return true;
       } else if (elementType === 'transition') {
-        if (checkPlaceTransitionCollision(place.x, place.y, newX, newY)) return true;
+        if (checkPlaceTransitionCollision(place.x, place.y, r2, newX, newY, w1, h1)) return true;
       }
     }
 
     // Controlează coliziune cu tranzitii
     for (const trans of transitions) {
       if (trans.id === elementId) continue;
+      const w2 = trans.width || TRANSITION_WIDTH;
+      const h2 = trans.height || TRANSITION_HEIGHT;
       if (elementType === 'transition') {
-        if (checkTransitionCollision(newX, newY, trans.x, trans.y)) return true;
+        if (checkTransitionCollision(newX, newY, w1, h1, trans.x, trans.y, w2, h2)) return true;
       } else if (elementType === 'place') {
-        if (checkPlaceTransitionCollision(newX, newY, trans.x, trans.y)) return true;
+        if (checkPlaceTransitionCollision(newX, newY, r1, trans.x, trans.y, w2, h2)) return true;
       }
     }
 
     return false;
   };
+
+  // Start resize
+  const handleResizeStart = (e, elementId, type, direction) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (type === 'place') {
+      const place = places.find(p => p.id === elementId);
+      if (!place) return;
+      setResizing({
+        elementId,
+        type,
+        direction,
+        startX: e.clientX,
+        startY: e.clientY,
+        startRadius: place.radius || PLACE_RADIUS,
+        startCenterX: place.x,
+        startCenterY: place.y
+      });
+    } else if (type === 'transition') {
+      const trans = transitions.find(t => t.id === elementId);
+      if (!trans) return;
+      setResizing({
+        elementId,
+        type,
+        direction,
+        startX: e.clientX,
+        startY: e.clientY,
+        startWidth: trans.width || TRANSITION_WIDTH,
+        startHeight: trans.height || TRANSITION_HEIGHT,
+        startCenterX: trans.x,
+        startCenterY: trans.y
+      });
+    }
+  };
+
+  // useEffect pentru redimensionare
+  useEffect(() => {
+    const handleResizeMove = (e) => {
+      if (!resizing) return;
+
+      const { elementId, type, direction, startX, startY, startRadius, startWidth, startHeight, startCenterX, startCenterY } = resizing;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      const minRadius = 15;
+      const minWidth = 20;
+      const minHeight = 20;
+
+      if (type === 'place') {
+        let newRadius = startRadius;
+        
+        if (direction === 'e') {
+          newRadius = Math.max(minRadius, startRadius + deltaX);
+        } else if (direction === 'w') {
+          newRadius = Math.max(minRadius, startRadius - deltaX);
+        } else if (direction === 's') {
+          newRadius = Math.max(minRadius, startRadius + deltaY);
+        } else if (direction === 'n') {
+          newRadius = Math.max(minRadius, startRadius - deltaY);
+        } else if (direction === 'se') {
+          newRadius = Math.max(minRadius, startRadius + Math.max(deltaX, deltaY));
+        } else if (direction === 'nw') {
+          newRadius = Math.max(minRadius, startRadius - Math.min(deltaX, deltaY));
+        } else if (direction === 'ne') {
+          newRadius = Math.max(minRadius, startRadius + Math.max(deltaX, -deltaY));
+        } else if (direction === 'sw') {
+          newRadius = Math.max(minRadius, startRadius + Math.max(-deltaX, deltaY));
+        }
+
+        if (hasCollisionWithOthers('place', elementId, startCenterX, startCenterY, newRadius)) {
+          return;
+        }
+
+        setPlaces(places => places.map(p =>
+          p.id === elementId ? { ...p, radius: newRadius } : p
+        ));
+      } else if (type === 'transition') {
+        let newWidth = startWidth;
+        let newHeight = startHeight;
+        let newCenterX = startCenterX;
+        let newCenterY = startCenterY;
+
+        const fixedLeft = startCenterX - startWidth / 2;
+        const fixedRight = startCenterX + startWidth / 2;
+        const fixedTop = startCenterY - startHeight / 2;
+        const fixedBottom = startCenterY + startHeight / 2;
+
+        if (direction.includes('e')) {
+          newWidth = Math.max(minWidth, startWidth + deltaX);
+          newCenterX = fixedLeft + newWidth / 2;
+        } else if (direction.includes('w')) {
+          newWidth = Math.max(minWidth, startWidth - deltaX);
+          newCenterX = fixedRight - newWidth / 2;
+        }
+
+        if (direction.includes('s')) {
+          newHeight = Math.max(minHeight, startHeight + deltaY);
+          newCenterY = fixedTop + newHeight / 2;
+        } else if (direction.includes('n')) {
+          newHeight = Math.max(minHeight, startHeight - deltaY);
+          newCenterY = fixedBottom - newHeight / 2;
+        }
+
+        if (hasCollisionWithOthers('transition', elementId, newCenterX, newCenterY, newWidth, newHeight)) {
+          return;
+        }
+
+        setTransitions(transitions => transitions.map(t =>
+          t.id === elementId ? { ...t, x: newCenterX, y: newCenterY, width: newWidth, height: newHeight } : t
+        ));
+      }
+    };
+
+    const handleResizeUp = () => {
+      setResizing(null);
+    };
+
+    if (resizing) {
+      window.addEventListener('mousemove', handleResizeMove);
+      window.addEventListener('mouseup', handleResizeUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleResizeMove);
+      window.removeEventListener('mouseup', handleResizeUp);
+    };
+  }, [resizing, places, transitions]);
 
   // ============ EVENT HANDLERS - CANVAS ============
 
@@ -453,8 +589,19 @@ function PetriNetEditor() {
       const newY = y - draggingOffset.y;
 
       // Check for collision before allowing drag
-      if (hasCollisionWithOthers(draggingElement.type, draggingElement.id, newX, newY)) {
-        return; // Don't allow move if collision detected
+      if (draggingElement.type === 'place') {
+        const place = places.find(p => p.id === draggingElement.id);
+        const radius = place ? (place.radius || PLACE_RADIUS) : PLACE_RADIUS;
+        if (hasCollisionWithOthers('place', draggingElement.id, newX, newY, radius)) {
+          return;
+        }
+      } else if (draggingElement.type === 'transition') {
+        const trans = transitions.find(t => t.id === draggingElement.id);
+        const width = trans ? (trans.width || TRANSITION_WIDTH) : TRANSITION_WIDTH;
+        const height = trans ? (trans.height || TRANSITION_HEIGHT) : TRANSITION_HEIGHT;
+        if (hasCollisionWithOthers('transition', draggingElement.id, newX, newY, width, height)) {
+          return;
+        }
       }
 
       if (draggingElement.type === 'place') {
@@ -506,7 +653,8 @@ function PetriNetEditor() {
     if (arcConnectionMode) {
       // Look for place/transition to connect
       for (const place of places) {
-        if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
+        const r = place.radius || PLACE_RADIUS;
+        if (Math.hypot(x - place.x, y - place.y) <= r) {
           if (!arcStart) {
             setArcStart({ type: 'place', id: place.id, element: place });
           } else {
@@ -527,7 +675,9 @@ function PetriNetEditor() {
       }
 
       for (const trans of transitions) {
-        const dist = distancePointToRect(x, y, trans.x - TRANSITION_WIDTH / 2, trans.y - TRANSITION_HEIGHT / 2, TRANSITION_WIDTH, TRANSITION_HEIGHT);
+        const w = trans.width || TRANSITION_WIDTH;
+        const h = trans.height || TRANSITION_HEIGHT;
+        const dist = distancePointToRect(x, y, trans.x - w / 2, trans.y - h / 2, w, h);
         if (dist <= 5) {
           if (!arcStart) {
             setArcStart({ type: 'transition', id: trans.id, element: trans });
@@ -553,7 +703,8 @@ function PetriNetEditor() {
     // Normal selection and element interaction (cursor mode)
     // Check for place click - drag existing place or select it
     for (const place of places) {
-      if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
+      const r = place.radius || PLACE_RADIUS;
+      if (Math.hypot(x - place.x, y - place.y) <= r) {
         setSelectedElement({ type: 'place', id: place.id });
         setDraggingElement({ type: 'place', id: place.id });
         setDraggingOffset({ x: x - place.x, y: y - place.y });
@@ -563,7 +714,9 @@ function PetriNetEditor() {
 
     // Check for transition click - drag existing transition or select it
     for (const trans of transitions) {
-      const dist = distancePointToRect(x, y, trans.x - TRANSITION_WIDTH / 2, trans.y - TRANSITION_HEIGHT / 2, TRANSITION_WIDTH, TRANSITION_HEIGHT);
+      const w = trans.width || TRANSITION_WIDTH;
+      const h = trans.height || TRANSITION_HEIGHT;
+      const dist = distancePointToRect(x, y, trans.x - w / 2, trans.y - h / 2, w, h);
       if (dist <= 5) {
         setSelectedElement({ type: 'transition', id: trans.id });
         setDraggingElement({ type: 'transition', id: trans.id });
@@ -633,22 +786,23 @@ function PetriNetEditor() {
 
     if (draggedTool === 'place') {
       // Check collision with other elements
-      if (hasCollisionWithOthers('place', null, x, y)) {
+      if (hasCollisionWithOthers('place', null, x, y, PLACE_RADIUS)) {
         return; // Don't allow placement if collision detected
       }
-      const newPlace = { id: Date.now(), x, y, label: 'P', tokens: 0 };
+      const newPlace = { id: Date.now(), x, y, label: 'P', tokens: 0, radius: PLACE_RADIUS };
       setPlaces([...places, newPlace]);
     } else if (draggedTool === 'transition') {
       // Check collision with other elements
-      if (hasCollisionWithOthers('transition', null, x, y)) {
+      if (hasCollisionWithOthers('transition', null, x, y, TRANSITION_WIDTH, TRANSITION_HEIGHT)) {
         return; // Don't allow placement if collision detected
       }
-      const newTransition = { id: Date.now(), x, y, label: 'T' };
+      const newTransition = { id: Date.now(), x, y, label: 'T', width: TRANSITION_WIDTH, height: TRANSITION_HEIGHT };
       setTransitions([...transitions, newTransition]);
     } else if (draggedTool === 'addTokens') {
       // Find place at drop position
       for (const place of places) {
-        if (Math.hypot(x - place.x, y - place.y) <= PLACE_RADIUS) {
+        const r = place.radius || PLACE_RADIUS;
+        if (Math.hypot(x - place.x, y - place.y) <= r) {
           setPlaces(places.map(p => 
             p.id === place.id ? { ...p, tokens: p.tokens + 1 } : p
           ));
@@ -765,17 +919,20 @@ function PetriNetEditor() {
 
   // Calculate bounds including arcs
   places.forEach(p => {
-    minX = Math.min(minX, p.x - PLACE_RADIUS);
-    minY = Math.min(minY, p.y - PLACE_RADIUS);
-    maxX = Math.max(maxX, p.x + PLACE_RADIUS);
-    maxY = Math.max(maxY, p.y + PLACE_RADIUS);
+    const r = p.radius || PLACE_RADIUS;
+    minX = Math.min(minX, p.x - r);
+    minY = Math.min(minY, p.y - r);
+    maxX = Math.max(maxX, p.x + r);
+    maxY = Math.max(maxY, p.y + r);
   });
 
   transitions.forEach(t => {
-    minX = Math.min(minX, t.x - TRANSITION_WIDTH / 2);
-    minY = Math.min(minY, t.y - TRANSITION_HEIGHT / 2);
-    maxX = Math.max(maxX, t.x + TRANSITION_WIDTH / 2);
-    maxY = Math.max(maxY, t.y + TRANSITION_HEIGHT / 2);
+    const w = t.width || TRANSITION_WIDTH;
+    const h = t.height || TRANSITION_HEIGHT;
+    minX = Math.min(minX, t.x - w / 2);
+    minY = Math.min(minY, t.y - h / 2);
+    maxX = Math.max(maxX, t.x + w / 2);
+    maxY = Math.max(maxY, t.y + h / 2);
   });
 
   arcs.forEach(arc => {
@@ -860,7 +1017,10 @@ function PetriNetEditor() {
     const dir = { x: dx / len, y: dy / len };
 
     // Poziționează săgeata pe marginea nodului destinație (corectat)
-    const arrowRadius = getRadiusInDirection(toType, dir, 50, 30, 25);
+    const toWidth = toObj.width || TRANSITION_WIDTH;
+    const toHeight = toObj.height || TRANSITION_HEIGHT;
+    const toRadius = toObj.radius || PLACE_RADIUS;
+    const arrowRadius = getRadiusInDirection(toType, dir, toWidth, toHeight, toRadius);
     const arrowX = toX - dir.x * arrowRadius;
     const arrowY = toY - dir.y * arrowRadius;
     const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
@@ -873,15 +1033,16 @@ function PetriNetEditor() {
   places.forEach(p => {
     const x = p.x;
     const y = p.y;
-    svg += `  <circle cx="${x}" cy="${y}" r="${PLACE_RADIUS}" fill="white" stroke="#5b21b6" stroke-width="2"/>\n`;
+    const r = p.radius || PLACE_RADIUS;
+    svg += `  <circle cx="${x}" cy="${y}" r="${r}" fill="white" stroke="#5b21b6" stroke-width="2"/>\n`;
     svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${p.label}</text>\n`;
     
     if (p.tokens > 0) {
       const tokenRadius = TOKEN_RADIUS;
       for (let i = 0; i < p.tokens; i++) {
         const angle = (i / p.tokens) * 2 * Math.PI;
-        const tx = x + Math.cos(angle) * 12;
-        const ty = y + Math.sin(angle) * 12;
+        const tx = x + Math.cos(angle) * (r * 0.48);
+        const ty = y + Math.sin(angle) * (r * 0.48);
         svg += `  <circle cx="${tx}" cy="${ty}" r="${tokenRadius}" fill="#5b21b6" stroke="none"/>\n`;
       }
     }
@@ -891,7 +1052,9 @@ function PetriNetEditor() {
   transitions.forEach(t => {
     const x = t.x;
     const y = t.y;
-    svg += `  <rect x="${x - TRANSITION_WIDTH / 2}" y="${y - TRANSITION_HEIGHT / 2}" width="${TRANSITION_WIDTH}" height="${TRANSITION_HEIGHT}" fill="white" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
+    const w = t.width || TRANSITION_WIDTH;
+    const h = t.height || TRANSITION_HEIGHT;
+    svg += `  <rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" fill="white" stroke="#5b21b6" stroke-width="2" rx="4"/>\n`;
     svg += `  <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-family="Arial" fill="#5b21b6" font-weight="bold">${t.label}</text>\n`;
   });
 
@@ -987,7 +1150,10 @@ function PetriNetEditor() {
           const dir = { x: dx / len, y: dy / len };
 
           // Position arrow on the edge of the target node based on its type
-          const arrowRadius = getRadiusInDirection(toType, dir, 50, 30, 25);
+          const toWidth = toObj.width || TRANSITION_WIDTH;
+          const toHeight = toObj.height || TRANSITION_HEIGHT;
+          const toRadius = toObj.radius || PLACE_RADIUS;
+          const arrowRadius = getRadiusInDirection(toType, dir, toWidth, toHeight, toRadius);
           const arrowX = toX - dir.x * arrowRadius;
           const arrowY = toY - dir.y * arrowRadius;
           const arrowPoints = createArrowhead(arrowX, arrowY, dir, 8);
@@ -1080,84 +1246,279 @@ function PetriNetEditor() {
         )}
 
         {/* Draw places */}
-        {places.map((place) => (
-          <g key={place.id}>
-            <circle
-              cx={place.x}
-              cy={place.y}
-              r={PLACE_RADIUS}
-              fill={selectedElement?.id === place.id ? '#ede9fe' : 'white'}
-              stroke={selectedElement?.id === place.id ? '#7c3aed' : '#5b21b6'}
-              strokeWidth={selectedElement?.id === place.id ? 3 : 2}
-              style={{ cursor: 'pointer' }}
-              onDoubleClick={() => setEditingLabel({ type: 'place', id: place.id })}
-            />
-            <text
-              x={place.x}
-              y={place.y}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontSize="14"
-              fontFamily="Arial"
-              fill="#5b21b6"
-              fontWeight="bold"
-              style={{ pointerEvents: 'none' }}
-            >
-              {place.label}
-            </text>
+        {places.map((place) => {
+          const r = place.radius || PLACE_RADIUS;
+          return (
+            <g key={place.id}>
+              <circle
+                cx={place.x}
+                cy={place.y}
+                r={r}
+                fill={selectedElement?.id === place.id ? '#ede9fe' : 'white'}
+                stroke={selectedElement?.id === place.id ? '#7c3aed' : '#5b21b6'}
+                strokeWidth={selectedElement?.id === place.id ? 3 : 2}
+                style={{ cursor: 'pointer' }}
+                onDoubleClick={() => setEditingLabel({ type: 'place', id: place.id })}
+              />
+              <text
+                x={place.x}
+                y={place.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize="14"
+                fontFamily="Arial"
+                fill="#5b21b6"
+                fontWeight="bold"
+                style={{ pointerEvents: 'none' }}
+              >
+                {place.label}
+              </text>
 
-            {/* Draw tokens */}
-            {place.tokens > 0 && (
-              <>
-                {Array.from({ length: place.tokens }).map((_, idx) => {
-                  const angle = (idx / place.tokens) * 2 * Math.PI;
-                  const tx = place.x + Math.cos(angle) * 12;
-                  const ty = place.y + Math.sin(angle) * 12;
-                  return (
-                    <circle
-                      key={`token-${idx}`}
-                      cx={tx}
-                      cy={ty}
-                      r={TOKEN_RADIUS}
-                      fill="#5b21b6"
-                    />
-                  );
-                })}
-              </>
-            )}
-          </g>
-        ))}
+              {/* Draw tokens */}
+              {place.tokens > 0 && (
+                <>
+                  {Array.from({ length: place.tokens }).map((_, idx) => {
+                    const angle = (idx / place.tokens) * 2 * Math.PI;
+                    const tx = place.x + Math.cos(angle) * (r * 0.48);
+                    const ty = place.y + Math.sin(angle) * (r * 0.48);
+                    return (
+                      <circle
+                        key={`token-${idx}`}
+                        cx={tx}
+                        cy={ty}
+                        r={TOKEN_RADIUS}
+                        fill="#5b21b6"
+                      />
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Bounding box and resize handles for places */}
+              {selectedElement?.id === place.id && (
+                <>
+                  <rect
+                    x={place.x - r}
+                    y={place.y - r}
+                    width={r * 2}
+                    height={r * 2}
+                    className="resize-bounding-box"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                  {/* NW handle */}
+                  <rect
+                    x={place.x - r - 4}
+                    y={place.y - r - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nwse-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'nw')}
+                  />
+                  {/* N handle */}
+                  <rect
+                    x={place.x - 4}
+                    y={place.y - r - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ns-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'n')}
+                  />
+                  {/* NE handle */}
+                  <rect
+                    x={place.x + r - 4}
+                    y={place.y - r - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nesw-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'ne')}
+                  />
+                  {/* E handle */}
+                  <rect
+                    x={place.x + r - 4}
+                    y={place.y - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ew-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'e')}
+                  />
+                  {/* SE handle */}
+                  <rect
+                    x={place.x + r - 4}
+                    y={place.y + r - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nwse-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'se')}
+                  />
+                  {/* S handle */}
+                  <rect
+                    x={place.x - 4}
+                    y={place.y + r - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ns-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 's')}
+                  />
+                  {/* SW handle */}
+                  <rect
+                    x={place.x - r - 4}
+                    y={place.y + r - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nesw-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'sw')}
+                  />
+                  {/* W handle */}
+                  <rect
+                    x={place.x - r - 4}
+                    y={place.y - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ew-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, place.id, 'place', 'w')}
+                  />
+                </>
+              )}
+            </g>
+          );
+        })}
 
         {/* Draw transitions */}
-        {transitions.map((trans) => (
-          <g key={trans.id}>
-            <rect
-              x={trans.x - TRANSITION_WIDTH / 2}
-              y={trans.y - TRANSITION_HEIGHT / 2}
-              width={TRANSITION_WIDTH}
-              height={TRANSITION_HEIGHT}
-              fill={selectedElement?.id === trans.id ? '#ede9fe' : 'white'}
-              stroke={selectedElement?.id === trans.id ? '#7c3aed' : '#5b21b6'}
-              strokeWidth={selectedElement?.id === trans.id ? 3 : 2}
-              rx="4"
-              style={{ cursor: 'pointer' }}
-              onDoubleClick={() => setEditingLabel({ type: 'transition', id: trans.id })}
-            />
-            <text
-              x={trans.x}
-              y={trans.y}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontSize="14"
-              fontFamily="Arial"
-              fill="#5b21b6"
-              fontWeight="bold"
-              style={{ pointerEvents: 'none' }}
-            >
-              {trans.label}
-            </text>
-          </g>
-        ))}
+        {transitions.map((trans) => {
+          const w = trans.width || TRANSITION_WIDTH;
+          const h = trans.height || TRANSITION_HEIGHT;
+          return (
+            <g key={trans.id}>
+              <rect
+                x={trans.x - w / 2}
+                y={trans.y - h / 2}
+                width={w}
+                height={h}
+                fill={selectedElement?.id === trans.id ? '#ede9fe' : 'white'}
+                stroke={selectedElement?.id === trans.id ? '#7c3aed' : '#5b21b6'}
+                strokeWidth={selectedElement?.id === trans.id ? 3 : 2}
+                rx="4"
+                style={{ cursor: 'pointer' }}
+                onDoubleClick={() => setEditingLabel({ type: 'transition', id: trans.id })}
+              />
+              <text
+                x={trans.x}
+                y={trans.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize="14"
+                fontFamily="Arial"
+                fill="#5b21b6"
+                fontWeight="bold"
+                style={{ pointerEvents: 'none' }}
+              >
+                {trans.label}
+              </text>
+
+              {/* Bounding box and resize handles for transitions */}
+              {selectedElement?.id === trans.id && (
+                <>
+                  <rect
+                    x={trans.x - w / 2}
+                    y={trans.y - h / 2}
+                    width={w}
+                    height={h}
+                    className="resize-bounding-box"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                  {/* NW handle */}
+                  <rect
+                    x={trans.x - w / 2 - 4}
+                    y={trans.y - h / 2 - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nwse-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'nw')}
+                  />
+                  {/* N handle */}
+                  <rect
+                    x={trans.x - 4}
+                    y={trans.y - h / 2 - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ns-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'n')}
+                  />
+                  {/* NE handle */}
+                  <rect
+                    x={trans.x + w / 2 - 4}
+                    y={trans.y - h / 2 - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nesw-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'ne')}
+                  />
+                  {/* E handle */}
+                  <rect
+                    x={trans.x + w / 2 - 4}
+                    y={trans.y - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ew-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'e')}
+                  />
+                  {/* SE handle */}
+                  <rect
+                    x={trans.x + w / 2 - 4}
+                    y={trans.y + h / 2 - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nwse-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'se')}
+                  />
+                  {/* S handle */}
+                  <rect
+                    x={trans.x - 4}
+                    y={trans.y + h / 2 - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ns-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 's')}
+                  />
+                  {/* SW handle */}
+                  <rect
+                    x={trans.x - w / 2 - 4}
+                    y={trans.y + h / 2 - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'nesw-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'sw')}
+                  />
+                  {/* W handle */}
+                  <rect
+                    x={trans.x - w / 2 - 4}
+                    y={trans.y - 4}
+                    width="8"
+                    height="8"
+                    className="resize-handle"
+                    style={{ cursor: 'ew-resize' }}
+                    onMouseDown={(e) => handleResizeStart(e, trans.id, 'transition', 'w')}
+                  />
+                </>
+              )}
+            </g>
+          );
+        })}
       </svg>
     );
   };

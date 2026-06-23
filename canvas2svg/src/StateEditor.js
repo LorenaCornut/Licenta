@@ -488,9 +488,9 @@ const StateEditor = () => {
         const isBottomLoop = conn.loopDirection === 'bottom';
         const directionMultiplier = isBottomLoop ? -1 : 1;
         
-        const startX = fromX + nodeRadius * 0.6;
+        const startX = fromX + nodeRadius * 0.5;
         const startY = fromY - nodeRadius * 0.5 * directionMultiplier;
-        const endX = fromX - nodeRadius * 0.6;
+        const endX = fromX - nodeRadius * 0.5;
         const endY = fromY - nodeRadius * 0.5 * directionMultiplier;
         
         const controlX1 = fromX + nodeRadius + 30;
@@ -504,7 +504,7 @@ const StateEditor = () => {
         svg += `<path d='M ${startX} ${startY} C ${controlX1} ${controlY1} ${controlX2} ${controlY2} ${endX} ${endY}' stroke='#7c3aed' stroke-width='2' fill='none'/>\n`;
         
         // Arrowhead on loop end
-        const arrowDirX = -nodeRadius * 0.6;
+        const arrowDirX = -nodeRadius * 0.5;
         const arrowDirLen = Math.hypot(arrowDirX, -nodeRadius * 0.5 * directionMultiplier);
         const arrowDirXNorm = arrowDirX / arrowDirLen;
         const arrowDirYNorm = (-nodeRadius * 0.5 * directionMultiplier) / arrowDirLen;
@@ -1034,9 +1034,9 @@ const StateEditor = () => {
               const directionMultiplier = isBottomLoop ? -1 : 1;
               
               // Start and end points on the node's edge
-              const startX = fromX + nodeRadius * 0.6;
+              const startX = fromX + nodeRadius * 0.5;
               const startY = fromY - nodeRadius * 0.5 * directionMultiplier;
-              const endX = fromX - nodeRadius * 0.6;
+              const endX = fromX - nodeRadius * 0.5;
               const endY = fromY - nodeRadius * 0.5 * directionMultiplier;
               
               // Control points for a nice arc (above or below the node)
