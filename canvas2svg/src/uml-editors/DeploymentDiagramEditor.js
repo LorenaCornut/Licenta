@@ -110,6 +110,20 @@ function buildOrthogonalPathThroughWaypoints(waypoints) {
   return d;
 }
 
+// ===== ADAUGĂ FUNCȚIA AICI =====
+/**
+ * Calculate distance from a point to a line segment
+ */
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), projX: x1, projY: y1, t: 0 };
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return { dist: Math.hypot(px - projX, py - projY), projX, projY, t };
+}
+
 /**
  * Find path around obstacles with perpendicular approach to target edge
  */
@@ -435,6 +449,8 @@ function DeploymentDiagramEditor() {
   const [saveError, setSaveError] = useState('');
   const [currentDiagramId, setCurrentDiagramId] = useState(null);
 
+  const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
+
   // Load diagram if editing
   useEffect(() => {
     if (diagramId && diagramId !== 'new') {
@@ -733,6 +749,37 @@ function DeploymentDiagramEditor() {
     };
   }, [draggingConnectionEnd, connections, elements]);
 
+  // ============ DRAG WAYPOINTS ============
+useEffect(() => {
+  if (!draggingWaypoint) return;
+  
+  const handleMove = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const newX = e.clientX - rect.left;
+    const newY = e.clientY - rect.top;
+    
+    setConnections(prev => prev.map(c => {
+      if (c.id !== draggingWaypoint.connectionId) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+      newWps[draggingWaypoint.idx] = { x: newX, y: newY };
+      return { ...c, controlPoints: newWps };
+    }));
+  };
+  
+  const handleUp = () => {
+    setDraggingWaypoint(null);
+  };
+  
+  window.addEventListener('mousemove', handleMove);
+  window.addEventListener('mouseup', handleUp);
+  return () => {
+    window.removeEventListener('mousemove', handleMove);
+    window.removeEventListener('mouseup', handleUp);
+  };
+}, [draggingWaypoint]);
+
   const loadDiagram = async (id) => {
   setIsLoading(true);
   try {
@@ -952,6 +999,74 @@ function DeploymentDiagramEditor() {
     setConnections(connections.filter(conn => conn.id !== connId));
     setSelectedConnection(null);
   };
+
+  // ============ WAYPOINT FUNCTIONS ============
+
+/**
+ * Adaugă punct intermediar la dublu-click pe muchie
+ */
+const handleEdgeDoubleClick = (e, connection) => {
+  if (!connection) return;
+  const canvas = canvasRef.current;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  const fromEl = elements.find(el => el.id === connection.from);
+  const toEl = elements.find(el => el.id === connection.to);
+  if (!fromEl || !toEl) return;
+  
+  const fromPoint = getConnectionPointForElement(fromEl, connection.fromPoint);
+  const toPoint = getConnectionPointForElement(toEl, connection.toPoint);
+  const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
+  
+  // Construiește toate punctele: start + user waypoints + end
+  const segmentPoints = [fromPoint, ...userWps, toPoint];
+  let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+  
+  // Găsește cel mai apropiat segment de click
+  for (let i = 0; i < segmentPoints.length - 1; i++) {
+    const { dist, projX, projY } = distanceToSegment(
+      x, y,
+      segmentPoints[i].x, segmentPoints[i].y,
+      segmentPoints[i + 1].x, segmentPoints[i + 1].y
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      insertIdx = i; // Inserează după segmentul i
+      bestProj = { x: projX, y: projY };
+    }
+  }
+  
+  // Adaugă punctul la poziția corectă
+  setConnections(prev => prev.map(c => {
+    if (c.id !== connection.id) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+    newWps.splice(insertIdx, 0, bestProj);
+    return { ...c, controlPoints: newWps };
+  }));
+};
+
+/**
+ * Începe drag pe un waypoint
+ */
+const handleWaypointMouseDown = (e, connectionId, idx) => {
+  e.stopPropagation();
+  setDraggingWaypoint({ connectionId, idx });
+};
+
+/**
+ * Șterge waypoint la Alt+click
+ */
+const handleWaypointClick = (e, connectionId, idx) => {
+  if (!e.altKey) return;
+  setConnections(prev => prev.map(c => {
+    if (c.id !== connectionId) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+    newWps.splice(idx, 1);
+    return { ...c, controlPoints: newWps };
+  }));
+};
 
   const startEditingElement = (elementId, currentText) => {
     setEditingElementId(elementId);
@@ -1214,336 +1329,361 @@ function DeploymentDiagramEditor() {
   };
 
   const renderCanvas = () => {
-    return (
-      <>
-        {/* SVG for connections - BACKGROUND LAYER */}
-        <svg style={{ 
-          position: 'absolute', 
-          top: 0, 
-          left: 0, 
-          width: '100%', 
-          height: '100%', 
-          pointerEvents: 'auto',
-          zIndex: 0
-        }}>
-          <defs>
-            {/* Arrow marker for deployment/manifestation lines */}
-            <marker id="arrowDeployment" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L9,3 z" fill="#333" />
-            </marker>
-          </defs>
+  return (
+    <>
+      {/* SVG for connections - BACKGROUND LAYER */}
+      <svg style={{ 
+        position: 'absolute', 
+        top: 0, 
+        left: 0, 
+        width: '100%', 
+        height: '100%', 
+        pointerEvents: 'auto',
+        zIndex: 0
+      }}>
+        <defs>
+          {/* Arrow marker for deployment/manifestation lines */}
+          <marker id="arrowDeployment" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#333" />
+          </marker>
+        </defs>
 
-          {/* Render connections */}
-          {connections.map(conn => {
-            const fromEl = elements.find(e => e.id === conn.from);
-            const toEl = elements.find(e => e.id === conn.to);
-            const connType = CONNECTION_TYPES[conn.type];
-            if (!fromEl || !toEl || !connType) return null;
+        {/* Render connections */}
+        {connections.map(conn => {
+          const fromEl = elements.find(e => e.id === conn.from);
+          const toEl = elements.find(e => e.id === conn.to);
+          const connType = CONNECTION_TYPES[conn.type];
+          if (!fromEl || !toEl || !connType) return null;
 
-            // Recalculate connection points using stored edge+offset
-            const fromPt = getConnectionPointForElement(fromEl, conn.fromPoint);
-            const toPt = getConnectionPointForElement(toEl, conn.toPoint);
-            const fromX = fromPt.x;
-            const fromY = fromPt.y;
-            const toX = toPt.x;
-            const toY = toPt.y;
+          // Recalculate connection points using stored edge+offset
+          const fromPt = getConnectionPointForElement(fromEl, conn.fromPoint);
+          const toPt = getConnectionPointForElement(toEl, conn.toPoint);
+          const fromX = fromPt.x;
+          const fromY = fromPt.y;
+          const toX = toPt.x;
+          const toY = toPt.y;
 
-            // Build waypoints - use control points if available
-            let waypoints;
-            if (conn.controlPoints && conn.controlPoints.length > 0) {
-              // Use control points
-              waypoints = [{ x: fromX, y: fromY }, ...conn.controlPoints, { x: toX, y: toY }];
-            } else {
-              // Find path around obstacles with orthogonal routing
-              waypoints = findPathAroundObstacles(
-                fromX, fromY, toX, toY,
-                elements,
-                [conn.from, conn.to],
-                conn.toPoint?.point
-              );
-            }
-
-            // Convert waypoints to SVG path with 90-degree corners
-            const pathD = buildOrthogonalPathThroughWaypoints(waypoints);
-
-            const isDashed = connType.style === 'dashed';
-            const hasArrow = connType.hasArrow;
-            const isSelected = selectedConnection === conn.id;
-
-            return (
-              <g key={conn.id}>
-                {/* Invisible hit area */}
-                <path d={pathD} fill="none" stroke="transparent" strokeWidth="8" 
-                      pointerEvents="auto" onClick={(e) => { e.stopPropagation(); setSelectedConnection(conn.id); }}
-                      style={{ cursor: 'pointer' }} />
-                
-                {/* Visible path */}
-                <path d={pathD} fill="none" 
-                      stroke={isSelected ? '#dc2626' : '#333'} 
-                      strokeWidth={isSelected ? 3 : 2}
-                      strokeDasharray={isDashed ? '5,5' : 'none'}
-                      markerEnd={hasArrow ? 'url(#arrowDeployment)' : 'none'}
-                      pointerEvents="none"/>
-                
-                {/* Connection label/type */}
-                {conn.type === 'DEPLOYMENT' && (
-                  <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 10} 
-                        fontSize="12" fill="#666" textAnchor="middle" fontStyle="italic" fontWeight="600"
-                        pointerEvents="none">
-                    &lt;&lt;deploy&gt;&gt;
-                  </text>
-                )}
-
-                {conn.type === 'MANIFESTATION' && (
-                  <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 10} 
-                        fontSize="12" fill="#666" textAnchor="middle" fontStyle="italic" fontWeight="600"
-                        pointerEvents="none">
-                    &lt;&lt;manifest&gt;&gt;
-                  </text>
-                )}
-                
-                {/* Custom label - only show if not empty and not epsilon */}
-                {conn.label && conn.label !== 'ε' && (
-                  <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 + 10} 
-                        fontSize="12" fill="#333" textAnchor="middle" fontWeight="600"
-                        pointerEvents="none">
-                    {conn.label}
-                  </text>
-                )}
-
-                {/* Connection end handles - only show if selected */}
-                {isSelected && (
-                  <>
-                    {/* From end handle */}
-                    <circle 
-                      cx={draggedConnectionPoint && draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.x : fromX}
-                      cy={draggedConnectionPoint && draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.y : fromY}
-                      r="6" 
-                      fill="#7c3aed" 
-                      stroke="#fff" 
-                      strokeWidth="2"
-                      pointerEvents="auto"
-                      cursor="grab"
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        setDraggingConnectionEnd({ connectionId: conn.id, isFromEnd: true });
-                      }}
-                      style={{
-                        opacity: draggingConnectionEnd?.isFromEnd ? 0.9 : 0.7,
-                      }}
-                    />
-                    
-                    {/* To end handle */}
-                    <circle 
-                      cx={draggedConnectionPoint && !draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.x : toX}
-                      cy={draggedConnectionPoint && !draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.y : toY}
-                      r="6" 
-                      fill="#7c3aed" 
-                      stroke="#fff" 
-                      strokeWidth="2"
-                      pointerEvents="auto"
-                      cursor="grab"
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        setDraggingConnectionEnd({ connectionId: conn.id, isFromEnd: false });
-                      }}
-                      style={{
-                        opacity: draggingConnectionEnd && !draggingConnectionEnd.isFromEnd ? 0.9 : 0.7,
-                      }}
-                    />
-
-
-                  </>
-                )}
-              </g>
+          // Build waypoints - use control points if available
+          let waypoints;
+          if (conn.controlPoints && conn.controlPoints.length > 0) {
+            // Use control points
+            waypoints = [{ x: fromX, y: fromY }, ...conn.controlPoints, { x: toX, y: toY }];
+          } else {
+            // Find path around obstacles with orthogonal routing
+            waypoints = findPathAroundObstacles(
+              fromX, fromY, toX, toY,
+              elements,
+              [conn.from, conn.to],
+              conn.toPoint?.point
             );
-          })}
-        </svg>
+          }
 
-        {/* HTML Elements positioned absolutely */}
-        {elements.map(el => {
-          const isSelected = selectedElement === el.id;
-          const isStart = connectionStart === el.id;
+          // Convert waypoints to SVG path with 90-degree corners
+          const pathD = buildOrthogonalPathThroughWaypoints(waypoints);
+
+          const isDashed = connType.style === 'dashed';
+          const hasArrow = connType.hasArrow;
+          const isSelected = selectedConnection === conn.id;
 
           return (
-            <div
-              key={el.id}
-              data-element-id={el.id}
-              onClick={(e) => handleElementClick(e, el.id)}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                startEditingElement(el.id, el.label);
-              }}
-              onMouseDown={(e) => handleElementMouseDown(e, el.id)}
-              style={{
-                position: 'absolute',
-                left: `${el.x}px`,
-                top: `${el.y}px`,
-                width: `${el.width}px`,
-                height: `${el.height}px`,
-                cursor: draggingElement === el.id ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                zIndex: isSelected ? 1000 : 100,
-                opacity: isStart ? 0.7 : 1
-              }}
-            >
-              <svg style={{ width: '100%', height: '100%' }} viewBox={`0 0 ${el.width} ${el.height}`}>
-                {(el.type === 'NODE' || el.type === 'EXECUTION_ENV' || el.type === 'NETWORK') && (
-                  <>
-                    {/* Stereotype text (top) */}
-                    {el.stereotype && (
-                      <text x={el.width / 2} y="16" textAnchor="middle" fontSize="11" fill="#333" fontStyle="italic" fontWeight="600">
-                        &lt;&lt;{el.stereotype}&gt;&gt;
-                      </text>
-                    )}
-                    
-                    {el.type === 'NETWORK' ? (
-                      <>
-                        {/* Network: Large horizontal bar/platform */}
-                        {/* Top face */}
-                        <polygon points={`0,${el.height * 0.3} 12,${el.height * 0.2} ${el.width + 12},${el.height * 0.2} ${el.width},${el.height * 0.3}`}
-                                 fill="#B0E0FF" stroke="#333" strokeWidth="2"/>
-                        
-                        {/* Front face */}
-                        <rect x="0" y={el.height * 0.3} width={el.width} height={el.height * 0.7}
-                              fill="#A0D4FF" stroke="#333" strokeWidth="2"/>
-                        
-                        {/* Right face */}
-                        <polygon points={`${el.width},${el.height * 0.3} ${el.width + 12},${el.height * 0.2} ${el.width + 12},${el.height * 0.2 + el.height * 0.7} ${el.width},${el.height * 0.3 + el.height * 0.7}`}
-                                 fill="#8ACCFF" stroke="#333" strokeWidth="2"/>
-                        
-                        {/* Label */}
-                        {el.label && el.label.split('\n').map((line, idx) => (
-                          <text key={idx} x={el.width / 2} y={el.height * 0.55 + idx * 14} 
-                                textAnchor="middle" fontSize="11" fontWeight="bold" fill="#000">
-                            {line}
-                          </text>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        {/* Regular Cube: Node or Execution Environment */}
-                        {/* Top face */}
-                        <polygon points={`0,12 12,0 ${el.width + 12},0 ${el.width},12`}
-                                 fill="#B0E0FF" stroke="#333" strokeWidth="2"/>
-                        
-                        {/* Front face */}
-                        <rect x="0" y="12" width={el.width} height={el.height - 12}
-                              fill="#A0D4FF" stroke={isSelected ? '#dc2626' : '#333'} strokeWidth={isSelected ? 3 : 2}/>
-                        
-                        {/* Right face */}
-                        <polygon points={`${el.width},12 ${el.width + 12},0 ${el.width + 12},${el.height} ${el.width},${el.height - 0}`}
-                                 fill="#8ACCFF" stroke={isSelected ? '#dc2626' : '#333'} strokeWidth={isSelected ? 3 : 2}/>
-                        
-                        {/* Label - below stereotype */}
-                        {el.label && el.label.split('\n').map((line, idx) => (
-                          <text key={idx} x={el.width / 2} y={(el.stereotype ? el.height / 2 + 15 : el.height / 2 + 8) + idx * 14} 
-                                textAnchor="middle" fontSize="11" fontWeight="bold" fill="#000">
-                            {line}
-                          </text>
-                        ))}
-                      </>
-                    )}
-                  </>
-                )}
+            <g key={conn.id}>
+              {/* Invisible hit area - pentru click și dublu-click */}
+              <path 
+                d={pathD} 
+                fill="none" 
+                stroke="transparent" 
+                strokeWidth="12" 
+                pointerEvents="auto" 
+                onClick={(e) => { e.stopPropagation(); setSelectedConnection(conn.id); }}
+                onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
+                style={{ cursor: 'pointer' }} 
+              />
+              
+              {/* Visible path */}
+              <path 
+                d={pathD} 
+                fill="none" 
+                stroke={isSelected ? '#dc2626' : '#333'} 
+                strokeWidth={isSelected ? 3 : 2}
+                strokeDasharray={isDashed ? '5,5' : 'none'}
+                markerEnd={hasArrow ? 'url(#arrowDeployment)' : 'none'}
+                pointerEvents="none"
+              />
 
-                {el.type === 'ARTIFACT' && (
-                  <>
-                    <defs>
-                      <linearGradient id="artifactGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" style={{stopColor: el.color, stopOpacity: 1}} />
-                        <stop offset="100%" style={{stopColor: '#8ac4ff', stopOpacity: 1}} />
-                      </linearGradient>
-                    </defs>
-                    
-                    <rect x="0" y="0" width={el.width} height={el.height} 
-                          fill="url(#artifactGradient)" stroke={isSelected ? '#dc2626' : '#666'} 
-                          strokeWidth={isSelected ? 3 : 1.5} rx="2" ry="2"/>
-                    
-                    {/* Folded corner - document style */}
-                    <path d={`M ${el.width - 16},0 L ${el.width},0 L ${el.width},16 Z`}
-                          fill="#e8c547" stroke={isSelected ? '#dc2626' : '#999'} strokeWidth="0.5"/>
-                    
-                    {/* Fold line */}
-                    <line x1={el.width - 16} y1={0} x2={el.width} y2={16} 
-                          stroke={isSelected ? '#dc2626' : '#999'} strokeWidth="0.5" opacity="0.5"/>
-                    
-                    {/* Stereotype text */}
-                    <text x={el.width / 2} y="22" textAnchor="middle" fontSize="9" 
-                          fill="#444" fontStyle="italic" fontWeight="500" fontFamily="Arial">
-                      &lt;&lt;artifact&gt;&gt;
-                    </text>
-                    
-                    {/* Label text */}
-                    {el.label && el.label.split('\n').map((line, idx) => (
-                      <text key={idx} x={el.width / 2} y={el.height - 20 + idx * 14} 
-                            textAnchor="middle" fontSize="10" fontWeight="bold" fill="#333" fontFamily="Arial">
-                        {line}
-                      </text>
-                    ))}
-                  </>
-                )}
-              </svg>
-
-              {/* Text editing input - only show when editing */}
-              {editingElementId === el.id && (
-                <textarea
-                  value={editingText}
-                  onChange={(e) => setEditingText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.ctrlKey) {
-                      finishEditingElement();
-                    } else if (e.key === 'Escape') {
-                      cancelEditingElement();
-                    }
-                  }}
-                  onBlur={finishEditingElement}
-                  style={{
-                    position: 'absolute',
-                    top: '8px',
-                    left: '8px',
-                    width: Math.max(el.width - 26, 130),
-                    height: Math.max(el.height - 26, 80),
-                    padding: '6px 8px',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    textAlign: 'left',
-                    border: '2px solid #7c3aed',
-                    borderRadius: '4px',
-                    zIndex: 2000,
-                    backgroundColor: '#fff',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                    fontFamily: 'Arial, sans-serif',
-                    resize: 'none',
-                    wordWrap: 'break-word',
-                    whiteSpace: 'pre-wrap',
-                    overflow: 'auto',
-                    scrollBehavior: 'smooth'
-                  }}
-                  placeholder="Enter text... (Ctrl+Enter to save)"
-                  autoFocus
+              {/* ===== WAYPOINT CIRCLES ===== */}
+              {Array.isArray(conn.controlPoints) && conn.controlPoints.map((wp, idx) => (
+                <circle
+                  key={`wp-${idx}`}
+                  cx={wp.x}
+                  cy={wp.y}
+                  r={7}
+                  fill="#fff"
+                  stroke="#9168b7"
+                  strokeWidth={2}
+                  onMouseDown={(e) => handleWaypointMouseDown(e, conn.id, idx)}
+                  onClick={(e) => handleWaypointClick(e, conn.id, idx)}
+                  style={{ cursor: 'pointer' }}
+                  title="Drag to move, Alt+click to delete"
                 />
+              ))}
+              
+              {/* Connection label/type */}
+              {conn.type === 'DEPLOYMENT' && (
+                <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 10} 
+                      fontSize="12" fill="#666" textAnchor="middle" fontStyle="italic" fontWeight="600"
+                      pointerEvents="none">
+                  &lt;&lt;deploy&gt;&gt;
+                </text>
               )}
 
-              {/* Resize handles - only show when selected */}
+              {conn.type === 'MANIFESTATION' && (
+                <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 10} 
+                      fontSize="12" fill="#666" textAnchor="middle" fontStyle="italic" fontWeight="600"
+                      pointerEvents="none">
+                  &lt;&lt;manifest&gt;&gt;
+                </text>
+              )}
+              
+              {/* Custom label - only show if not empty and not epsilon */}
+              {conn.label && conn.label !== 'ε' && (
+                <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 + 10} 
+                      fontSize="12" fill="#333" textAnchor="middle" fontWeight="600"
+                      pointerEvents="none">
+                  {conn.label}
+                </text>
+              )}
+
+              {/* Connection end handles - only show if selected */}
               {isSelected && (
                 <>
-                  <div className="resize-handle resize-n" onMouseDown={(e) => handleResizeStart(e, el.id, 'n')} style={{ position: 'absolute', top: '-3px', left: '50%', transform: 'translateX(-50%)', width: '30px', height: '4px', cursor: 'ns-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-s" onMouseDown={(e) => handleResizeStart(e, el.id, 's')} style={{ position: 'absolute', bottom: '-3px', left: '50%', transform: 'translateX(-50%)', width: '30px', height: '4px', cursor: 'ns-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-e" onMouseDown={(e) => handleResizeStart(e, el.id, 'e')} style={{ position: 'absolute', right: '-3px', top: '50%', transform: 'translateY(-50%)', width: '4px', height: '30px', cursor: 'ew-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-w" onMouseDown={(e) => handleResizeStart(e, el.id, 'w')} style={{ position: 'absolute', left: '-3px', top: '50%', transform: 'translateY(-50%)', width: '4px', height: '30px', cursor: 'ew-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-ne" onMouseDown={(e) => handleResizeStart(e, el.id, 'ne')} style={{ position: 'absolute', top: '-3px', right: '-3px', width: '8px', height: '8px', cursor: 'nesw-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-nw" onMouseDown={(e) => handleResizeStart(e, el.id, 'nw')} style={{ position: 'absolute', top: '-3px', left: '-3px', width: '8px', height: '8px', cursor: 'nwse-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-se" onMouseDown={(e) => handleResizeStart(e, el.id, 'se')} style={{ position: 'absolute', bottom: '-3px', right: '-3px', width: '8px', height: '8px', cursor: 'nwse-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
-                  <div className="resize-handle resize-sw" onMouseDown={(e) => handleResizeStart(e, el.id, 'sw')} style={{ position: 'absolute', bottom: '-3px', left: '-3px', width: '8px', height: '8px', cursor: 'nesw-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
+                  {/* From end handle */}
+                  <circle 
+                    cx={draggedConnectionPoint && draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.x : fromX}
+                    cy={draggedConnectionPoint && draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.y : fromY}
+                    r="6" 
+                    fill="#7c3aed" 
+                    stroke="#fff" 
+                    strokeWidth="2"
+                    pointerEvents="auto"
+                    cursor="grab"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setDraggingConnectionEnd({ connectionId: conn.id, isFromEnd: true });
+                    }}
+                    style={{
+                      opacity: draggingConnectionEnd?.isFromEnd ? 0.9 : 0.7,
+                    }}
+                  />
+                  
+                  {/* To end handle */}
+                  <circle 
+                    cx={draggedConnectionPoint && !draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.x : toX}
+                    cy={draggedConnectionPoint && !draggingConnectionEnd?.isFromEnd ? draggedConnectionPoint.y : toY}
+                    r="6" 
+                    fill="#7c3aed" 
+                    stroke="#fff" 
+                    strokeWidth="2"
+                    pointerEvents="auto"
+                    cursor="grab"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setDraggingConnectionEnd({ connectionId: conn.id, isFromEnd: false });
+                    }}
+                    style={{
+                      opacity: draggingConnectionEnd && !draggingConnectionEnd.isFromEnd ? 0.9 : 0.7,
+                    }}
+                  />
                 </>
               )}
-            </div>
+            </g>
           );
         })}
-      </>
-    );
-  };
+      </svg>
+
+      {/* HTML Elements positioned absolutely */}
+      {elements.map(el => {
+        const isSelected = selectedElement === el.id;
+        const isStart = connectionStart === el.id;
+
+        return (
+          <div
+            key={el.id}
+            data-element-id={el.id}
+            onClick={(e) => handleElementClick(e, el.id)}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              startEditingElement(el.id, el.label);
+            }}
+            onMouseDown={(e) => handleElementMouseDown(e, el.id)}
+            style={{
+              position: 'absolute',
+              left: `${el.x}px`,
+              top: `${el.y}px`,
+              width: `${el.width}px`,
+              height: `${el.height}px`,
+              cursor: draggingElement === el.id ? 'grabbing' : 'grab',
+              userSelect: 'none',
+              zIndex: isSelected ? 1000 : 100,
+              opacity: isStart ? 0.7 : 1
+            }}
+          >
+            <svg style={{ width: '100%', height: '100%' }} viewBox={`0 0 ${el.width} ${el.height}`}>
+              {(el.type === 'NODE' || el.type === 'EXECUTION_ENV' || el.type === 'NETWORK') && (
+                <>
+                  {/* Stereotype text (top) */}
+                  {el.stereotype && (
+                    <text x={el.width / 2} y="16" textAnchor="middle" fontSize="11" fill="#333" fontStyle="italic" fontWeight="600">
+                      &lt;&lt;{el.stereotype}&gt;&gt;
+                    </text>
+                  )}
+                  
+                  {el.type === 'NETWORK' ? (
+                    <>
+                      {/* Network: Large horizontal bar/platform */}
+                      {/* Top face */}
+                      <polygon points={`0,${el.height * 0.3} 12,${el.height * 0.2} ${el.width + 12},${el.height * 0.2} ${el.width},${el.height * 0.3}`}
+                               fill="#B0E0FF" stroke="#333" strokeWidth="2"/>
+                      
+                      {/* Front face */}
+                      <rect x="0" y={el.height * 0.3} width={el.width} height={el.height * 0.7}
+                            fill="#A0D4FF" stroke="#333" strokeWidth="2"/>
+                      
+                      {/* Right face */}
+                      <polygon points={`${el.width},${el.height * 0.3} ${el.width + 12},${el.height * 0.2} ${el.width + 12},${el.height * 0.2 + el.height * 0.7} ${el.width},${el.height * 0.3 + el.height * 0.7}`}
+                               fill="#8ACCFF" stroke="#333" strokeWidth="2"/>
+                      
+                      {/* Label */}
+                      {el.label && el.label.split('\n').map((line, idx) => (
+                        <text key={idx} x={el.width / 2} y={el.height * 0.55 + idx * 14} 
+                              textAnchor="middle" fontSize="11" fontWeight="bold" fill="#000">
+                          {line}
+                        </text>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      {/* Regular Cube: Node or Execution Environment */}
+                      {/* Top face */}
+                      <polygon points={`0,12 12,0 ${el.width + 12},0 ${el.width},12`}
+                               fill="#B0E0FF" stroke="#333" strokeWidth="2"/>
+                      
+                      {/* Front face */}
+                      <rect x="0" y="12" width={el.width} height={el.height - 12}
+                            fill="#A0D4FF" stroke={isSelected ? '#dc2626' : '#333'} strokeWidth={isSelected ? 3 : 2}/>
+                      
+                      {/* Right face */}
+                      <polygon points={`${el.width},12 ${el.width + 12},0 ${el.width + 12},${el.height} ${el.width},${el.height - 0}`}
+                               fill="#8ACCFF" stroke={isSelected ? '#dc2626' : '#333'} strokeWidth={isSelected ? 3 : 2}/>
+                      
+                      {/* Label - below stereotype */}
+                      {el.label && el.label.split('\n').map((line, idx) => (
+                        <text key={idx} x={el.width / 2} y={(el.stereotype ? el.height / 2 + 15 : el.height / 2 + 8) + idx * 14} 
+                              textAnchor="middle" fontSize="11" fontWeight="bold" fill="#000">
+                          {line}
+                        </text>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+
+              {el.type === 'ARTIFACT' && (
+                <>
+                  <defs>
+                    <linearGradient id="artifactGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" style={{stopColor: el.color, stopOpacity: 1}} />
+                      <stop offset="100%" style={{stopColor: '#8ac4ff', stopOpacity: 1}} />
+                    </linearGradient>
+                  </defs>
+                  
+                  <rect x="0" y="0" width={el.width} height={el.height} 
+                        fill="url(#artifactGradient)" stroke={isSelected ? '#dc2626' : '#666'} 
+                        strokeWidth={isSelected ? 3 : 1.5} rx="2" ry="2"/>
+                  
+                  {/* Folded corner - document style */}
+                  <path d={`M ${el.width - 16},0 L ${el.width},0 L ${el.width},16 Z`}
+                        fill="#e8c547" stroke={isSelected ? '#dc2626' : '#999'} strokeWidth="0.5"/>
+                  
+                  {/* Fold line */}
+                  <line x1={el.width - 16} y1={0} x2={el.width} y2={16} 
+                        stroke={isSelected ? '#dc2626' : '#999'} strokeWidth="0.5" opacity="0.5"/>
+                  
+                  {/* Stereotype text */}
+                  <text x={el.width / 2} y="22" textAnchor="middle" fontSize="9" 
+                        fill="#444" fontStyle="italic" fontWeight="500" fontFamily="Arial">
+                    &lt;&lt;artifact&gt;&gt;
+                  </text>
+                  
+                  {/* Label text */}
+                  {el.label && el.label.split('\n').map((line, idx) => (
+                    <text key={idx} x={el.width / 2} y={el.height - 20 + idx * 14} 
+                          textAnchor="middle" fontSize="10" fontWeight="bold" fill="#333" fontFamily="Arial">
+                      {line}
+                    </text>
+                  ))}
+                </>
+              )}
+            </svg>
+
+            {/* Text editing input - only show when editing */}
+            {editingElementId === el.id && (
+              <textarea
+                value={editingText}
+                onChange={(e) => setEditingText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.ctrlKey) {
+                    finishEditingElement();
+                  } else if (e.key === 'Escape') {
+                    cancelEditingElement();
+                  }
+                }}
+                onBlur={finishEditingElement}
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  left: '8px',
+                  width: Math.max(el.width - 26, 130),
+                  height: Math.max(el.height - 26, 80),
+                  padding: '6px 8px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  textAlign: 'left',
+                  border: '2px solid #7c3aed',
+                  borderRadius: '4px',
+                  zIndex: 2000,
+                  backgroundColor: '#fff',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                  fontFamily: 'Arial, sans-serif',
+                  resize: 'none',
+                  wordWrap: 'break-word',
+                  whiteSpace: 'pre-wrap',
+                  overflow: 'auto',
+                  scrollBehavior: 'smooth'
+                }}
+                placeholder="Enter text... (Ctrl+Enter to save)"
+                autoFocus
+              />
+            )}
+
+            {/* Resize handles - only show when selected */}
+            {isSelected && (
+              <>
+                <div className="resize-handle resize-n" onMouseDown={(e) => handleResizeStart(e, el.id, 'n')} style={{ position: 'absolute', top: '-3px', left: '50%', transform: 'translateX(-50%)', width: '30px', height: '4px', cursor: 'ns-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
+                <div className="resize-handle resize-s" onMouseDown={(e) => handleResizeStart(e, el.id, 's')} style={{ position: 'absolute', bottom: '-3px', left: '50%', transform: 'translateX(-50%)', width: '30px', height: '4px', cursor: 'ns-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
+                <div className="resize-handle resize-e" onMouseDown={(e) => handleResizeStart(e, el.id, 'e')} style={{ position: 'absolute', right: '-3px', top: '50%', transform: 'translateY(-50%)', width: '4px', height: '30px', cursor: 'ew-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
+                <div className="resize-handle resize-w" onMouseDown={(e) => handleResizeStart(e, el.id, 'w')} style={{ position: 'absolute', left: '-3px', top: '50%', transform: 'translateY(-50%)', width: '4px', height: '30px', cursor: 'ew-resize', backgroundColor: '#7c3aed', borderRadius: '2px', opacity: 0.7 }} />
+                <div className="resize-handle resize-ne" onMouseDown={(e) => handleResizeStart(e, el.id, 'ne')} style={{ position: 'absolute', top: '-3px', right: '-3px', width: '8px', height: '8px', cursor: 'nesw-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
+                <div className="resize-handle resize-nw" onMouseDown={(e) => handleResizeStart(e, el.id, 'nw')} style={{ position: 'absolute', top: '-3px', left: '-3px', width: '8px', height: '8px', cursor: 'nwse-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
+                <div className="resize-handle resize-se" onMouseDown={(e) => handleResizeStart(e, el.id, 'se')} style={{ position: 'absolute', bottom: '-3px', right: '-3px', width: '8px', height: '8px', cursor: 'nwse-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
+                <div className="resize-handle resize-sw" onMouseDown={(e) => handleResizeStart(e, el.id, 'sw')} style={{ position: 'absolute', bottom: '-3px', left: '-3px', width: '8px', height: '8px', cursor: 'nesw-resize', backgroundColor: '#7c3aed', borderRadius: '1px', opacity: 0.7 }} />
+              </>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+};
 
   return (
     <div className="uml-editor">

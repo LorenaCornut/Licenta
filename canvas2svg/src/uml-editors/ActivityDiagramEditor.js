@@ -108,6 +108,17 @@ function buildOrthogonalPathThroughWaypoints(waypoints) {
   return d;
 }
 
+// Helper: calculează distanța de la un punct la un segment
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), projX: x1, projY: y1, t: 0 };
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return { dist: Math.hypot(px - projX, py - projY), projX, projY, t };
+}
+
 /**
  * Find path around obstacles with orthogonal routing
  */
@@ -490,6 +501,8 @@ function ActivityDiagramEditor() {
   const [saveDialogTitle, setSaveDialogTitle] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
+
   useEffect(() => {
     if (diagramId && diagramId !== 'new') loadDiagram(diagramId);
     else setCurrentDiagramId(null);
@@ -625,6 +638,34 @@ function ActivityDiagramEditor() {
       window.removeEventListener('mouseup', handleResizeUp);
     };
   }, [resizing, elements]);
+
+  // Handle dragging waypoints
+useEffect(() => {
+  if (!draggingWaypoint) return;
+  const handleMove = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const newX = e.clientX - rect.left;
+    const newY = e.clientY - rect.top;
+    
+    setConnections(connections => connections.map(c => {
+      if (c.id !== draggingWaypoint.connectionId) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+      newWps[draggingWaypoint.idx] = { x: newX, y: newY };
+      return { ...c, controlPoints: newWps, waypoints: undefined };
+    }));
+  };
+  const handleUp = () => {
+    setDraggingWaypoint(null);
+  };
+  window.addEventListener('mousemove', handleMove);
+  window.addEventListener('mouseup', handleUp);
+  return () => {
+    window.removeEventListener('mousemove', handleMove);
+    window.removeEventListener('mouseup', handleUp);
+  };
+}, [draggingWaypoint, connections]);
 
   const ensureConnectionOffsets = (conns) => {
     return conns.map(conn => ({
@@ -789,6 +830,60 @@ function ActivityDiagramEditor() {
     endpointDragRef.current = { startX: e.clientX, startY: e.clientY };
   };
 
+
+  // Adaugă punct intermediar pe muchie la dublu-click
+const handleEdgeDoubleClick = (e, connection) => {
+  if (!connection) return;
+  const canvas = canvasRef.current;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  const fromEl = elements.find(el => el.id === connection.from);
+  const toEl = elements.find(el => el.id === connection.to);
+  if (!fromEl || !toEl) return;
+  
+  const fromPoint = getPointAtOffsetOnEdge(fromEl, connection.fromEdge || 'bottom', connection.fromOffset);
+  const toPoint = getPointAtOffsetOnEdge(toEl, connection.toEdge || 'top', connection.toOffset);
+  const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : (connection.waypoints || []);
+  
+  const segmentPoints = [fromPoint, ...userWps, toPoint];
+  let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+  
+  for (let i = 0; i < segmentPoints.length - 1; i++) {
+    const { dist, projX, projY } = distanceToSegment(x, y, segmentPoints[i].x, segmentPoints[i].y, segmentPoints[i+1].x, segmentPoints[i+1].y);
+    if (dist < minDist) {
+      minDist = dist;
+      insertIdx = i;
+      bestProj = { x: projX, y: projY };
+    }
+  }
+  
+  const newConnections = connections.map(c => {
+    if (c.id !== connection.id) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+    newWps.splice(insertIdx, 0, bestProj);
+    return { ...c, controlPoints: newWps, waypoints: undefined };
+  });
+  setConnections(newConnections);
+};
+
+// Drag waypoint
+const handleWaypointMouseDown = (e, connectionId, idx) => {
+  e.stopPropagation();
+  setDraggingWaypoint({ connectionId, idx });
+};
+
+// Șterge waypoint la Alt+click
+const handleWaypointClick = (e, connectionId, idx) => {
+  if (!e.altKey) return;
+  setConnections(connections => connections.map(c => {
+    if (c.id !== connectionId) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : (c.waypoints ? [...c.waypoints] : []);
+    newWps.splice(idx, 1);
+    return { ...c, controlPoints: newWps, waypoints: undefined };
+  }));
+};
   const handleEndpointDrag = (e) => {
     if (!draggingEndpoint || !canvasRef.current) return;
     
@@ -1722,17 +1817,36 @@ const confirmSave = async () => {
               return (
                 <g key={conn.id}>
                   <path
-                    d={pathD}
-                    fill="none"
-                    stroke={isSelected ? '#7c3aed' : '#333'}
-                    strokeWidth={isSelected ? '3' : strokeWidth}
-                    strokeDasharray={strokeDasharray}
-                    markerEnd={marker}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    onClick={(e) => handleConnectionLineClick(e, conn.id)}
-                    style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
-                  />
+  d={pathD}
+  fill="none"
+  stroke={isSelected ? '#7c3aed' : '#333'}
+  strokeWidth={isSelected ? '3' : strokeWidth}
+  strokeDasharray={strokeDasharray}
+  markerEnd={marker}
+  strokeLinecap="round"
+  strokeLinejoin="round"
+  onClick={(e) => handleConnectionLineClick(e, conn.id)}
+  onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}  // <-- ADAUGĂ ASTA
+  style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+/>
+
+                  {/* Waypoint circles */}
+{Array.isArray(conn.controlPoints) && conn.controlPoints.map((wp, idx) => (
+  <circle
+    key={`wp-${idx}`}
+    cx={wp.x}
+    cy={wp.y}
+    r={7}
+    fill="#fff"
+    stroke="#9168b7"
+    strokeWidth={2}
+    onMouseDown={e => handleWaypointMouseDown(e, conn.id, idx)}
+    onClick={e => handleWaypointClick(e, conn.id, idx)}
+    onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
+    style={{ cursor: 'pointer' }}
+    title="Drag to move, Alt+click to delete"
+  />
+))}
                   
                   {/* Draggable endpoints - only when selected */}
                   {isSelected && (

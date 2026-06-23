@@ -254,6 +254,19 @@ function lineSegmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
          ccw(x1, y1, x2, y2, x3, y3) !== ccw(x1, y1, x2, y2, x4, y4);
 }
 
+/**
+ * Calculate distance from a point to a line segment
+ */
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+  if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), projX: x1, projY: y1, t: 0 };
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return { dist: Math.hypot(px - projX, py - projY), projX, projY, t };
+}
+
 function getContourIntersection(x1, y1, x2, y2, element) {
   const cx = element.x + element.width / 2;
   const cy = element.y + element.height / 2;
@@ -668,6 +681,8 @@ function StateMachineDiagramEditor() {
   const [editingEntryAction, setEditingEntryAction] = useState('');
   const [editingExitAction, setEditingExitAction] = useState('');
   const [draggingInCanvas, setDraggingInCanvas] = useState(false);
+
+  const [draggingWaypoint, setDraggingWaypoint] = useState(null); // {connectionId, idx}
 
   // Load diagram if editing
   useEffect(() => {
@@ -1210,6 +1225,74 @@ function StateMachineDiagramEditor() {
     setDraggingEndpoint({ connId, endpointType });
   };
 
+  // ============ WAYPOINT FUNCTIONS ============
+
+/**
+ * Adaugă punct intermediar la dublu-click pe muchie
+ */
+const handleEdgeDoubleClick = (e, connection) => {
+  if (!connection) return;
+  const canvas = canvasRef.current;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  const fromEl = elements.find(el => el.id === connection.from);
+  const toEl = elements.find(el => el.id === connection.to);
+  if (!fromEl || !toEl) return;
+  
+  const fromPoint = getPointAtOffsetOnEdge(fromEl, connection.fromEdge || 'bottom', connection.fromOffset || 0.5);
+  const toPoint = getPointAtOffsetOnEdge(toEl, connection.toEdge || 'top', connection.toOffset || 0.5);
+  const userWps = Array.isArray(connection.controlPoints) ? connection.controlPoints : [];
+  
+  // Construiește toate punctele: start + user waypoints + end
+  const segmentPoints = [fromPoint, ...userWps, toPoint];
+  let minDist = Infinity, insertIdx = 0, bestProj = { x, y };
+  
+  // Găsește cel mai apropiat segment de click
+  for (let i = 0; i < segmentPoints.length - 1; i++) {
+    const { dist, projX, projY } = distanceToSegment(
+      x, y,
+      segmentPoints[i].x, segmentPoints[i].y,
+      segmentPoints[i + 1].x, segmentPoints[i + 1].y
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      insertIdx = i;
+      bestProj = { x: projX, y: projY };
+    }
+  }
+  
+  // Adaugă punctul la poziția corectă
+  setConnections(prev => prev.map(c => {
+    if (c.id !== connection.id) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+    newWps.splice(insertIdx, 0, bestProj);
+    return { ...c, controlPoints: newWps };
+  }));
+};
+
+/**
+ * Începe drag pe un waypoint
+ */
+const handleWaypointMouseDown = (e, connectionId, idx) => {
+  e.stopPropagation();
+  setDraggingWaypoint({ connectionId, idx });
+};
+
+/**
+ * Șterge waypoint la Alt+click
+ */
+const handleWaypointClick = (e, connectionId, idx) => {
+  if (!e.altKey) return;
+  setConnections(prev => prev.map(c => {
+    if (c.id !== connectionId) return c;
+    const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+    newWps.splice(idx, 1);
+    return { ...c, controlPoints: newWps };
+  }));
+};
+
   useEffect(() => {
     if (draggingEndpoint) {
       window.addEventListener('mousemove', handleEndpointDrag);
@@ -1256,6 +1339,37 @@ function StateMachineDiagramEditor() {
     return () => input.removeEventListener('change', handleImportFile);
   }
 }, []);
+
+// ============ DRAG WAYPOINTS ============
+useEffect(() => {
+  if (!draggingWaypoint) return;
+  
+  const handleMove = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const newX = e.clientX - rect.left;
+    const newY = e.clientY - rect.top;
+    
+    setConnections(prev => prev.map(c => {
+      if (c.id !== draggingWaypoint.connectionId) return c;
+      const newWps = Array.isArray(c.controlPoints) ? [...c.controlPoints] : [];
+      newWps[draggingWaypoint.idx] = { x: newX, y: newY };
+      return { ...c, controlPoints: newWps };
+    }));
+  };
+  
+  const handleUp = () => {
+    setDraggingWaypoint(null);
+  };
+  
+  window.addEventListener('mousemove', handleMove);
+  window.addEventListener('mouseup', handleUp);
+  return () => {
+    window.removeEventListener('mousemove', handleMove);
+    window.removeEventListener('mouseup', handleUp);
+  };
+}, [draggingWaypoint]);
 
   // Export to SVG
   const handleExportSVG = () => {
@@ -1487,98 +1601,137 @@ function StateMachineDiagramEditor() {
             </defs>
 
             {/* Draw connections */}
-            {connections.map(conn => {
-              const fromEl = elements.find(e => e.id === conn.from);
-              const toEl = elements.find(e => e.id === conn.to);
-              if (!fromEl || !toEl) return null;
+{connections.map(conn => {
+  const fromEl = elements.find(e => e.id === conn.from);
+  const toEl = elements.find(e => e.id === conn.to);
+  if (!fromEl || !toEl) return null;
 
-              let pathD, fromPoint, toPoint, midX, midY;
-              const isSelected = selectedConnection === conn.id;
-              const w = fromEl.width || 140;
-              const h = fromEl.height || 80;
+  let pathD, fromPoint, toPoint, midX, midY;
+  const isSelected = selectedConnection === conn.id;
+  const w = fromEl.width || 140;
+  const h = fromEl.height || 80;
 
-              // Check if it's a self-transition
-              if (conn.from === conn.to) {
-                // Self-transition: use curved path
-                pathD = buildSelfTransitionPath(fromEl, conn.fromEdge || 'top', conn.fromOffset || 0.5, conn.toEdge || 'top', conn.toOffset || 0.5);
-                
-                // Calculate points for endpoints and label
-                if (conn.fromEdge === 'top' || conn.fromEdge === 'bottom') {
-                  fromPoint = { x: fromEl.x + w * conn.fromOffset, y: conn.fromEdge === 'top' ? fromEl.y : fromEl.y + h };
-                  toPoint = { x: fromEl.x + w * conn.toOffset, y: conn.toEdge === 'top' ? fromEl.y : fromEl.y + h };
-                  midX = (fromPoint.x + toPoint.x) / 2;
-                  midY = conn.fromEdge === 'top' ? fromEl.y - h * 0.4 : fromEl.y + h + h * 0.4;
-                } else {
-                  fromPoint = { x: conn.fromEdge === 'left' ? fromEl.x : fromEl.x + w, y: fromEl.y + h * conn.fromOffset };
-                  toPoint = { x: conn.toEdge === 'left' ? fromEl.x : fromEl.x + w, y: fromEl.y + h * conn.toOffset };
-                  midX = conn.fromEdge === 'left' ? fromEl.x - w * 0.4 : fromEl.x + w + w * 0.4;
-                  midY = (fromPoint.y + toPoint.y) / 2;
-                }
-              } else {
-                // Regular transition: use orthogonal path
-                fromPoint = getPointAtOffsetOnEdge(fromEl, conn.fromEdge || 'right', conn.fromOffset || 0.5);
-                toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'left', conn.toOffset || 0.5);
+  // Check if it's a self-transition
+  if (conn.from === conn.to) {
+    // Self-transition: use curved path
+    pathD = buildSelfTransitionPath(fromEl, conn.fromEdge || 'top', conn.fromOffset || 0.5, conn.toEdge || 'top', conn.toOffset || 0.5);
+    
+    // Calculate points for endpoints and label
+    if (conn.fromEdge === 'top' || conn.fromEdge === 'bottom') {
+      fromPoint = { x: fromEl.x + w * (conn.fromOffset || 0.5), y: conn.fromEdge === 'top' ? fromEl.y : fromEl.y + h };
+      toPoint = { x: fromEl.x + w * (conn.toOffset || 0.5), y: conn.toEdge === 'top' ? fromEl.y : fromEl.y + h };
+      midX = (fromPoint.x + toPoint.x) / 2;
+      midY = conn.fromEdge === 'top' ? fromEl.y - h * 0.4 : fromEl.y + h + h * 0.4;
+    } else {
+      fromPoint = { x: conn.fromEdge === 'left' ? fromEl.x : fromEl.x + w, y: fromEl.y + h * (conn.fromOffset || 0.5) };
+      toPoint = { x: conn.toEdge === 'left' ? fromEl.x : fromEl.x + w, y: fromEl.y + h * (conn.toOffset || 0.5) };
+      midX = conn.fromEdge === 'left' ? fromEl.x - w * 0.4 : fromEl.x + w + w * 0.4;
+      midY = (fromPoint.y + toPoint.y) / 2;
+    }
+  } else {
+    // Regular transition: use orthogonal path
+    fromPoint = getPointAtOffsetOnEdge(fromEl, conn.fromEdge || 'right', conn.fromOffset || 0.5);
+    toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'left', conn.toOffset || 0.5);
 
-                const waypoints = findPathAroundObstacles(fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, elements, [fromEl.id, toEl.id]);
-                pathD = buildOrthogonalPathThroughWaypoints(waypoints);
+    // Folosește punctele intermediare dacă există
+    let waypoints;
+    if (conn.controlPoints && conn.controlPoints.length > 0) {
+      waypoints = [{ x: fromPoint.x, y: fromPoint.y }, ...conn.controlPoints, { x: toPoint.x, y: toPoint.y }];
+    } else {
+      waypoints = findPathAroundObstacles(fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, elements, [fromEl.id, toEl.id]);
+    }
+    pathD = buildOrthogonalPathThroughWaypoints(waypoints);
 
-                midX = (fromPoint.x + toPoint.x) / 2;
-                midY = (fromPoint.y + toPoint.y) / 2;
-              }
+    midX = (fromPoint.x + toPoint.x) / 2;
+    midY = (fromPoint.y + toPoint.y) / 2;
+  }
 
-              return (
-                <g key={conn.id}>
-                  <path d={pathD} stroke="#333" strokeWidth="2" fill="none" markerEnd="url(#arrowStateTransition)" onClick={(e) => { e.stopPropagation(); setSelectedConnection(isSelected ? null : conn.id); }} style={{ cursor: 'pointer' }} />
-                  {conn.label && (
-                    <text
-                      x={midX}
-                      y={midY - 8}
-                      fontSize="11"
-                      fill="#333"
-                      textAnchor="middle"
-                      fontWeight="bold"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingConnectionId(conn.id);
-                        setEditingConnectionLabel(conn.label);
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {conn.label}
-                    </text>
-                  )}
-                  {/* Draggable endpoints - only when selected */}
-                  {isSelected && (
-                    <>
-                      <circle
-                        cx={fromPoint.x}
-                        cy={fromPoint.y}
-                        r={6}
-                        fill="#ec4899"
-                        stroke="#fff"
-                        strokeWidth="2"
-                        style={{ cursor: 'grab', transition: 'r 0.15s ease' }}
-                        onMouseDown={(e) => handleEndpointMouseDown(e, conn.id, 'from')}
-                        onMouseEnter={(e) => e.target.setAttribute('r', '8')}
-                        onMouseLeave={(e) => e.target.setAttribute('r', '6')}
-                      />
-                      <circle
-                        cx={toPoint.x}
-                        cy={toPoint.y}
-                        r={6}
-                        fill="#ec4899"
-                        stroke="#fff"
-                        strokeWidth="2"
-                        style={{ cursor: 'grab', transition: 'r 0.15s ease' }}
-                        onMouseDown={(e) => handleEndpointMouseDown(e, conn.id, 'to')}
-                        onMouseEnter={(e) => e.target.setAttribute('r', '8')}
-                        onMouseLeave={(e) => e.target.setAttribute('r', '6')}
-                      />
-                    </>
-                  )}
-                </g>
-              );
-            })}
+  return (
+    <g key={conn.id}>
+      {/* Linie invizibilă pentru click și dublu-click */}
+      <path 
+        d={pathD} 
+        stroke="transparent" 
+        strokeWidth="12" 
+        fill="none" 
+        onClick={(e) => { e.stopPropagation(); setSelectedConnection(isSelected ? null : conn.id); }}
+        onDoubleClick={(e) => handleEdgeDoubleClick(e, conn)}
+        style={{ cursor: 'pointer' }} 
+      />
+      
+      {/* Linie vizibilă */}
+      <path 
+        d={pathD} 
+        stroke="#333" 
+        strokeWidth={isSelected ? 3 : 2} 
+        fill="none" 
+        markerEnd="url(#arrowStateTransition)" 
+      />
+      
+      {/* ===== WAYPOINT CIRCLES ===== */}
+      {Array.isArray(conn.controlPoints) && conn.controlPoints.map((wp, idx) => (
+        <circle
+          key={`wp-${idx}`}
+          cx={wp.x}
+          cy={wp.y}
+          r={7}
+          fill="#fff"
+          stroke="#9168b7"
+          strokeWidth={2}
+          onMouseDown={(e) => handleWaypointMouseDown(e, conn.id, idx)}
+          onClick={(e) => handleWaypointClick(e, conn.id, idx)}
+          style={{ cursor: 'pointer' }}
+          title="Drag to move, Alt+click to delete"
+        />
+      ))}
+      
+      {conn.label && (
+        <text
+          x={midX}
+          y={midY - 8}
+          fontSize="11"
+          fill="#333"
+          textAnchor="middle"
+          fontWeight="bold"
+          onClick={(e) => {
+            e.stopPropagation();
+            setEditingConnectionId(conn.id);
+            setEditingConnectionLabel(conn.label);
+          }}
+          style={{ cursor: 'pointer' }}
+        >
+          {conn.label}
+        </text>
+      )}
+      
+      {/* Draggable endpoints - only when selected */}
+      {isSelected && (
+        <>
+          <circle
+            cx={fromPoint.x}
+            cy={fromPoint.y}
+            r={6}
+            fill="#ec4899"
+            stroke="#fff"
+            strokeWidth="2"
+            style={{ cursor: 'grab' }}
+            onMouseDown={(e) => handleEndpointMouseDown(e, conn.id, 'from')}
+          />
+          <circle
+            cx={toPoint.x}
+            cy={toPoint.y}
+            r={6}
+            fill="#ec4899"
+            stroke="#fff"
+            strokeWidth="2"
+            style={{ cursor: 'grab' }}
+            onMouseDown={(e) => handleEndpointMouseDown(e, conn.id, 'to')}
+          />
+        </>
+      )}
+    </g>
+  );
+})}
 
             {/* Draw elements */}
             {elements.map(el => {
