@@ -717,10 +717,13 @@ function StateMachineDiagramEditor() {
     const diagramTypeLower = diagramType.toLowerCase();
     
     const isStateMachine = diagramType === 'STATE_MACHINE_DIAGRAM' ||
-                          diagramType === 'AUTOMAT' ||
-                          diagramTypeLower.includes('automat') ||
-                          diagramTypeLower.includes('stări') ||
-                          diagramTypeLower.includes('stari');
+                      diagramType === 'AUTOMAT' ||
+                      diagramType === 'STATE_MACHINE' ||
+                      diagramType === 'Automat - Diagrama Stări' ||
+                      diagramTypeLower.includes('automat') ||
+                      diagramTypeLower.includes('stări') ||
+                      diagramTypeLower.includes('stari') ||
+                      diagramTypeLower.includes('state_machine');
     
     if (isStateMachine) {
       const normalizedElements = (data.elements || []).map(el => ({
@@ -737,7 +740,17 @@ function StateMachineDiagramEditor() {
       
       setTitle(diagram?.title || data.title || 'State Machine Diagram');
       setElements(normalizedElements);
-      setConnections(ensureConnectionOffsets(data.connections || []));
+      setConnections(data.connections?.map(conn => ({
+  id: conn.id,
+  from: conn.from || conn.fromId,
+  to: conn.to || conn.toId,
+  label: conn.label || conn.text?.label || 'event',
+  fromEdge: conn.fromEdge || conn.fromPoint?.point || 'right',
+  fromOffset: typeof conn.fromOffset === 'number' ? conn.fromOffset : (conn.fromPoint?.offset || 0.5),
+  toEdge: conn.toEdge || conn.toPoint?.point || 'left',
+  toOffset: typeof conn.toOffset === 'number' ? conn.toOffset : (conn.toPoint?.offset || 0.5),
+  controlPoints: Array.isArray(conn.controlPoints) ? conn.controlPoints : []  // <-- ASTA E IMPORTANT
+})) || []);
       setCurrentDiagramId(id);
       sessionStorage.setItem('currentDiagramId', id);
     }
@@ -806,7 +819,17 @@ function StateMachineDiagramEditor() {
       title: diagramTitle,
       tipDiagrama: 'STATE_MACHINE_DIAGRAM',
       elements: elements,
-      connections: ensureConnectionOffsets(connections),
+      connections: connections.map(conn => ({
+  id: conn.id,
+  from: conn.from,
+  to: conn.to,
+  label: conn.label || 'event',
+  fromEdge: conn.fromEdge || 'right',
+  fromOffset: typeof conn.fromOffset === 'number' ? conn.fromOffset : 0.5,
+  toEdge: conn.toEdge || 'left',
+  toOffset: typeof conn.toOffset === 'number' ? conn.toOffset : 0.5,
+  controlPoints: Array.isArray(conn.controlPoints) ? conn.controlPoints : []  // <-- ASTA E IMPORTANT
+})),
       ...(diagramIdToUpdate && { diagramId: diagramIdToUpdate })
     };
 
@@ -1400,81 +1423,86 @@ useEffect(() => {
   };
 
   const generateSVG = () => {
-    let svg = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
-    svg += '<svg width="1200" height="800" xmlns="http://www.w3.org/2000/svg">\n';
-    svg += '<defs><marker id="arrowStateTransition" markerWidth="16" markerHeight="16" refX="15" refY="8" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 16 8 L 0 16 Z" fill="#333" stroke="#333" stroke-width="0.5"/></marker></defs>\n';
-    svg += '<rect width="1200" height="800" fill="white" stroke="#ccc" stroke-width="1"/>\n';
+  let svg = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
+  svg += '<svg width="1200" height="800" xmlns="http://www.w3.org/2000/svg">\n';
+  svg += '<defs><marker id="arrowStateTransition" markerWidth="16" markerHeight="16" refX="15" refY="8" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 16 8 L 0 16 Z" fill="#333" stroke="#333" stroke-width="0.5"/></marker></defs>\n';
+  svg += '<rect width="1200" height="800" fill="white" stroke="#ccc" stroke-width="1"/>\n';
 
-    // Draw connections
-    for (const conn of connections) {
-      const fromEl = elements.find(e => e.id === conn.from);
-      const toEl = elements.find(e => e.id === conn.to);
-      if (!fromEl || !toEl) continue;
+  // Draw connections
+  for (const conn of connections) {
+    const fromEl = elements.find(e => e.id === conn.from);
+    const toEl = elements.find(e => e.id === conn.to);
+    if (!fromEl || !toEl) continue;
 
-      let pathD;
-      let midX, midY;
+    let pathD;
+    let midX, midY;
 
-      // Check if it's a self-transition
-      if (conn.from === conn.to) {
-        // Self-transition: use curved path
-        pathD = buildSelfTransitionPath(fromEl, conn.fromEdge || 'top', conn.fromOffset || 0.5, conn.toEdge || 'top', conn.toOffset || 0.5);
-        
-        // Calculate midpoint for label (at the top of the curve)
-        const w = fromEl.width || 140;
-        const h = fromEl.height || 80;
-        if (conn.fromEdge === 'top' || conn.fromEdge === 'bottom') {
-          midX = (fromEl.x + w * conn.fromOffset + fromEl.x + w * conn.toOffset) / 2;
-          midY = conn.fromEdge === 'top' ? fromEl.y - h * 0.4 : fromEl.y + h + h * 0.4;
-        } else {
-          midX = conn.fromEdge === 'left' ? fromEl.x - w * 0.4 : fromEl.x + w + w * 0.4;
-          midY = (fromEl.y + h * conn.fromOffset + fromEl.y + h * conn.toOffset) / 2;
-        }
+    // Check if it's a self-transition
+    if (conn.from === conn.to) {
+      // Self-transition: use curved path
+      pathD = buildSelfTransitionPath(fromEl, conn.fromEdge || 'top', conn.fromOffset || 0.5, conn.toEdge || 'top', conn.toOffset || 0.5);
+      
+      // Calculate midpoint for label (at the top of the curve)
+      const w = fromEl.width || 140;
+      const h = fromEl.height || 80;
+      if (conn.fromEdge === 'top' || conn.fromEdge === 'bottom') {
+        midX = (fromEl.x + w * conn.fromOffset + fromEl.x + w * conn.toOffset) / 2;
+        midY = conn.fromEdge === 'top' ? fromEl.y - h * 0.4 : fromEl.y + h + h * 0.4;
       } else {
-        // Regular transition: use orthogonal path
-        const fromPoint = getPointAtOffsetOnEdge(fromEl, conn.fromEdge || 'right', conn.fromOffset || 0.5);
-        const toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'left', conn.toOffset || 0.5);
-
-        const waypoints = findPathAroundObstacles(fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, elements, [fromEl.id, toEl.id]);
-        pathD = buildOrthogonalPathThroughWaypoints(waypoints);
-
-        midX = (fromPoint.x + toPoint.x) / 2;
-        midY = (fromPoint.y + toPoint.y) / 2;
+        midX = conn.fromEdge === 'left' ? fromEl.x - w * 0.4 : fromEl.x + w + w * 0.4;
+        midY = (fromEl.y + h * conn.fromOffset + fromEl.y + h * conn.toOffset) / 2;
       }
+    } else {
+      // Regular transition: use orthogonal path
+      const fromPoint = getPointAtOffsetOnEdge(fromEl, conn.fromEdge || 'right', conn.fromOffset || 0.5);
+      const toPoint = getPointAtOffsetOnEdge(toEl, conn.toEdge || 'left', conn.toOffset || 0.5);
 
-      svg += `<path d="${pathD}" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowStateTransition)" />\n`;
-
-      if (conn.label) {
-        svg += `<text x="${midX}" y="${midY - 5}" font-family="Arial" font-size="11" fill="#333" text-anchor="middle">${conn.label}</text>\n`;
+      // ===== FOLOSEȘTE controlPoints DACĂ EXISTĂ =====
+      let waypoints;
+      if (conn.controlPoints && conn.controlPoints.length > 0) {
+        waypoints = [{ x: fromPoint.x, y: fromPoint.y }, ...conn.controlPoints, { x: toPoint.x, y: toPoint.y }];
+      } else {
+        waypoints = findPathAroundObstacles(fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, elements, [fromEl.id, toEl.id]);
       }
+      pathD = buildOrthogonalPathThroughWaypoints(waypoints);
+
+      midX = (fromPoint.x + toPoint.x) / 2;
+      midY = (fromPoint.y + toPoint.y) / 2;
     }
 
-    // Draw elements
-    for (const el of elements) {
-      if (el.type === 'STATE') {
-        svg += `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" rx="20" ry="20" fill="#D4E8F8" stroke="#333" stroke-width="2" />\n`;
-        svg += `<text x="${el.x + el.width / 2}" y="${el.y + el.height / 2 - 10}" font-family="Arial" font-size="12" fill="#333" text-anchor="middle" font-weight="bold">${el.label || 'State'}</text>\n`;
-        // Add entry/exit actions
-        if (el.entryAction) {
-          svg += `<text x="${el.x + 6}" y="${el.y + el.height / 2 + 5}" font-family="Arial" font-size="9" fill="#666">+On Entry / ${el.entryAction}</text>\n`;
-        }
-        if (el.exitAction) {
-          svg += `<text x="${el.x + 6}" y="${el.y + el.height / 2 + 18}" font-family="Arial" font-size="9" fill="#666">+On Exit / ${el.exitAction}</text>\n`;
-        }
-      } else if (el.type === 'INITIAL_STATE') {
-        svg += `<circle cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" r="${el.width / 2}" fill="#333" stroke="#333" stroke-width="2" />\n`;
-      } else if (el.type === 'FINAL_STATE') {
-        svg += `<circle cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" r="${el.width / 2}" fill="white" stroke="#333" stroke-width="2" />\n`;
-        svg += `<circle cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" r="${el.width / 4}" fill="#333" stroke="#333" stroke-width="1" />\n`;
-      } else if (el.type === 'CHOICE_POINT') {
-        const cx = el.x + el.width / 2;
-        const cy = el.y + el.height / 2;
-        svg += `<polygon points="${cx},${el.y} ${el.x + el.width},${cy} ${cx},${el.y + el.height} ${el.x},${cy}" fill="#FFE8D4" stroke="#333" stroke-width="2" />\n`;
-      }
-    }
+    svg += `<path d="${pathD}" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowStateTransition)" />\n`;
 
-    svg += '</svg>';
-    return svg;
-  };
+    if (conn.label) {
+      svg += `<text x="${midX}" y="${midY - 5}" font-family="Arial" font-size="11" fill="#333" text-anchor="middle">${conn.label}</text>\n`;
+    }
+  }
+
+  // Draw elements (rămâne la fel)
+  for (const el of elements) {
+    if (el.type === 'STATE') {
+      svg += `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" rx="20" ry="20" fill="#D4E8F8" stroke="#333" stroke-width="2" />\n`;
+      svg += `<text x="${el.x + el.width / 2}" y="${el.y + el.height / 2 - 10}" font-family="Arial" font-size="12" fill="#333" text-anchor="middle" font-weight="bold">${el.label || 'State'}</text>\n`;
+      if (el.entryAction) {
+        svg += `<text x="${el.x + 6}" y="${el.y + el.height / 2 + 5}" font-family="Arial" font-size="9" fill="#666">+On Entry / ${el.entryAction}</text>\n`;
+      }
+      if (el.exitAction) {
+        svg += `<text x="${el.x + 6}" y="${el.y + el.height / 2 + 18}" font-family="Arial" font-size="9" fill="#666">+On Exit / ${el.exitAction}</text>\n`;
+      }
+    } else if (el.type === 'INITIAL_STATE') {
+      svg += `<circle cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" r="${el.width / 2}" fill="#333" stroke="#333" stroke-width="2" />\n`;
+    } else if (el.type === 'FINAL_STATE') {
+      svg += `<circle cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" r="${el.width / 2}" fill="white" stroke="#333" stroke-width="2" />\n`;
+      svg += `<circle cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" r="${el.width / 4}" fill="#333" stroke="#333" stroke-width="1" />\n`;
+    } else if (el.type === 'CHOICE_POINT') {
+      const cx = el.x + el.width / 2;
+      const cy = el.y + el.height / 2;
+      svg += `<polygon points="${cx},${el.y} ${el.x + el.width},${cy} ${cx},${el.y + el.height} ${el.x},${cy}" fill="#FFE8D4" stroke="#333" stroke-width="2" />\n`;
+    }
+  }
+
+  svg += '</svg>';
+  return svg;
+};
 
   return (
     <>
